@@ -1,0 +1,289 @@
+
+Singlestep Time               :   6.85e-01 sec (100.00%) ---> 43.689 Mpart/sec
+                                       29926583 particles finished by this node.
+
+| Tuning/MapTune_bmerge_proper_0p015619_Amerge_60p565 (625^3, CPD=147, ppc=76.9) - 8x1 MPI ranks
+| 102 x Intel(R) Xeon(R) CPU Max 9470C
+| 3 x 
+
+Singlestep Prologue           :   2.63e-02 sec ( 3.84%) 
+Slab Pipeline                 :   5.81e-01 sec (84.77%) 
+Post Timestep                 :   1.20e-03 sec ( 0.17%) 
+Convolution                   :   2.42e-02 sec ( 3.54%) 
+LC Complete Finalize          :   0.00e+00 sec ( 0.00%) 
+Singlestep Epilogue           :   2.56e-03 sec ( 0.37%) 
+Finish IO                     :   0.00e+00 sec ( 0.00%) 
+Unaccounted                   :   5.38e-02 sec ( 7.85%) 
+
+Breakdown of Slab Pipeline: 
+    FetchSlabs                    :   3.33e-05 sec ( 0.01%) 
+    Transpose Positions           :   1.51e-02 sec ( 2.60%) 
+    NearForce [blocking]          :   2.01e-02 sec ( 3.46%) 
+    NearForce [non-blocking]      :   2.76e-01 sec (47.57%) ---> 1054.89 effective GDIPS, 108.20 Mpart/sec
+    Unpack Env Slab               :   1.46e-02 sec ( 2.51%) 
+    Taylors                       :   4.47e-02 sec ( 7.69%) ---> 669.36 Mpart/sec
+    Kick                          :   1.45e-02 sec ( 2.49%) ---> 2063.32 Mpart/sec
+    Group Finding                 :   4.73e-02 sec ( 8.14%) --->   0.01 Mpart/sec
+    Output                        :   2.29e-05 sec ( 0.00%) ---> 1303626.50 Mpart/sec
+    Drift                         :   1.00e-02 sec ( 1.72%) ---> 2992.61 Mpart/sec
+    Finish                        :   5.78e-02 sec ( 9.95%) ---> 517.81 Mpart/sec
+    Check Multipoles MPI          :   0.00e+00 sec ( 0.00%) 
+    Manifest                      :   4.59e-03 sec ( 0.79%) 
+    MPI Barrier                   :   1.11e-03 sec ( 0.19%) 
+    Spinning                      :   3.42e-01 sec (58.89%) 
+    Unaccounted                   :   8.97e-03 sec ( 1.54%) 
+
+Breakdown of Post Timestep:
+    Post Timestep                 :   1.20e-03 sec ( 0.17%) 
+        Subsample IO                  :   0.00e+00 sec ( 0.00%) 
+        LC Start Finalize             :   4.25e-07 sec ( 0.04%) 
+        Reductions                    :   8.52e-05 sec ( 7.11%) 
+
+Breakdown of Near Force:
+    Blocking                      :   2.01e-02 sec ( 3.46%) 
+        Precondition                  :   2.77e-04 sec ( 1.38%) 
+        Calculate Splits              :   1.83e-03 sec ( 9.13%) 
+        Construct Pencils             :   1.74e-02 sec (86.85%) 
+        Dispatch Interaction          :   3.03e-04 sec ( 1.51%) 
+        CPU Fallback                  :   0.00e+00 sec ( 0.00%) --->   0.00 GDIPS,   0.00 Gdirects,   0.00 Mpart/sec
+
+    Non-Blocking (thread-seconds, 18 threads):   4.54e+00 sec (781.98%) 
+        Fill Sinks                    :   3.16e-01 sec ( 6.96%) ---> 5674.6 MB/s, 472.89 MSink/sec
+        Fill Sources                  :   1.01e+00 sec (22.15%) ---> 2607.8 MB/s, 217.32 MSource/sec
+        Launch Kernels                :   6.29e-02 sec ( 1.39%) 
+        Wait for GPU Result           :   2.51e+00 sec (55.18%) 
+        Copy Accel from Pinned        :   6.51e-01 sec (14.33%) ---> 2756.4 MB/s, 229.70 MSink/sec
+
+    Non-Blocking Throughput (Wall Clock):   2.76e-01 sec (47.57%) 
+				---> 1054.89 effective GDIPS, 108.20 Mpart/sec, 541.02 Msink/sec
+				---> 291.41 Gdirects, 314.91 padded Gdirects
+				---> with 18 device threads, estimate 9.5% thread imbalance
+				---> directs load imbalance is 7.22%
+
+
+Breakdown of Taylors:
+    Taylor Computation            :   4.47e-02 sec ( 7.69%) ---> 669.44 Mpart/sec
+        Precondition                  :   2.36e-04 sec ( 0.53%) 
+        Compute Cell Offsets          :   4.16e-04 sec ( 0.93%) 
+        Taylor FFT                    :   1.00e-02 sec (22.42%) 
+        Taylor Kernel + R2C           :   3.14e-02 sec (70.32%) 
+        Taylor Redlack                :   2.37e-03 sec ( 5.32%) 
+
+Breakdown of Kick:
+    Kick                          :   1.45e-02 sec ( 2.49%) ---> 2063.32 Mpart/sec
+        Precondition                  :   1.61e-04 sec ( 1.11%) 
+        Accumulate Pencil Stats       :   1.74e-04 sec ( 1.20%) 
+        Add Near + Far Accel          :   2.95e-03 sec (20.33%) ---> 340.26 GiB/sec
+        Kick Cell                     :   1.10e-02 sec (75.60%) ---> 2729.21 Mpart/sec
+        Free slabs                    :   2.63e-04 sec ( 1.82%) 
+
+Breakdown of Group Finding: (446 active particles)
+    Group Finding                 :   4.73e-02 sec ( 8.14%) --->   0.01 Mpart/sec
+        Preconditions                 :   6.17e-04 sec ( 1.31%) 
+        MakeCellGroups                :   3.67e-03 sec ( 7.75%) 
+        FindCellGroupLinks            :   1.19e-02 sec (25.16%) 
+        DoGlobalGroups                :   3.02e-02 sec (63.93%) 
+            Create (Sort + Index + Find)  :   1.33e-02 sec (43.88%) 
+            Gather particles/Scatter aux  :   4.75e-03 sec (15.71%) 
+            Collide Tracers               :   1.68e-03 sec ( 5.57%) 
+                Particle Sort                 :   0.00e+00 sec ( 0.00%) 
+                CreateGroupsFormation         :   0.00e+00 sec ( 0.00%) 
+                CreateGroupsMerger            :   0.00e+00 sec ( 0.00%) 
+                CreateGroupsAccretion         :   0.00e+00 sec ( 0.00%) 
+                ProcessGroups                 :   0.00e+00 sec ( 0.00%) 
+            TracersMAPOutput              :   0.00e+00 sec ( 0.00%) 
+            TracersGroupOutput            :   0.00e+00 sec ( 0.00%) 
+            Find L1 Halos                 :   0.00e+00 sec ( 0.00%) 
+            Output L1 Halos               :   0.00e+00 sec ( 0.00%) 
+        FinishGroups                  :   1.49e-03 sec ( 3.16%) 
+            Scatter Groups                :   0.00e+00 sec ( 0.00%) --->   0.00 M_group_part/sec
+
+Breakdown of Output:
+    Output                        :   2.29e-05 sec ( 0.00%) ---> 1303626.50 Mpart/sec
+        Precondition                  :   1.44e-04 sec (626.11%) 
+        Output Time Slice             :   4.46e-06 sec (19.45%) ---> 6703487.50 Mpart/sec
+        Output Light Cone             :   9.84e-06 sec (42.92%) ---> 3037379.50 Mpart/sec
+        Output Binned                 :   2.14e-06 sec ( 9.32%) 
+
+Breakdown of Drift:
+    Drift                         :   1.00e-02 sec ( 1.72%) ---> 2992.61 Mpart/sec
+        Precondition                  :   1.48e-04 sec ( 1.48%) 
+        Move                          :   3.49e-03 sec (34.96%) 
+        Rebin                         :   6.35e-03 sec (63.48%) 
+
+Breakdown of Compute Multipole:
+    Compute Multipoles            :   2.60e-02 sec (46.32%) ---> 1149.56 Mpart/sec
+        Compute Cell Offsets          :   4.03e-04 sec ( 1.55%) 
+        Multipole Kernel + C2R        :   1.43e-02 sec (54.82%) 
+        Multipole FFT                 :   1.10e-02 sec (42.23%) 
+
+Breakdown of Finish:
+    Finish Particles              :   5.62e-02 sec ( 9.68%) ---> 532.46 Mpart/sec
+        Precondition                  :   3.16e-04 sec ( 0.56%) 
+        Free ReadState Slabs          :   4.66e-04 sec ( 0.83%) 
+        Collect IL Gaps               :   3.27e-03 sec ( 5.81%) 
+        Partition Insert List         :   1.32e-03 sec ( 2.34%) 
+        Sort Insert List              :   6.25e-03 sec (11.12%) ---> 111.64 Mitems/sec (7e+05 items)
+            mmsort Indexing               :   1.54e-04 sec ( 2.46%) 
+            mmsort Sorting                :   2.74e-03 sec (43.80%) 
+            mmsort RefinePartition        :   3.20e-04 sec ( 5.12%) 
+            mmsort Merging                :   2.90e-03 sec (46.45%) 
+            mmsort SortPart (avg/thr)     :   1.92e-03 sec (30.65%) 
+            mmsort Bisect (avg/thr)       :   3.91e-05 sec ( 0.63%) 
+            mmsort Popping (avg/thr)      :   7.12e-04 sec (11.39%) 
+        Index Cells                   :   2.09e-03 sec ( 3.71%) 
+        Merge                         :   1.46e-02 sec (25.91%) ---> 2054.97 Mpart/sec
+        Compute Multipoles            :   2.60e-02 sec (46.32%) ---> 1149.56 Mpart/sec
+        Write Particles               :   7.22e-06 sec ( 0.01%) 
+        Queuing Send Manifest         :   2.13e-03 sec ( 3.79%) 
+    Finish Multipoles             :   1.59e-03 sec ( 0.27%) 
+        Precondition                  :   2.77e-04 sec (17.40%) 
+        Queuing Multipole MPI         :   0.00e+00 sec ( 0.00%) 
+        Write Multipoles              :   0.00e+00 sec ( 0.00%) 
+        Release Free Memory To Kernel :   0.00e+00 sec ( 0.00%) 
+    Free MPI Multipoles           :   0.00e+00 sec ( 0.00%) 
+
+Breakdown of various MPI work:
+    Check Manifest MPI            :   1.65e-01 sec (28.50%) 
+    Queuing Receive Manifest      :   3.65e-03 sec ( 0.63%) 
+    Queuing Send Manifest [Finish]:   2.13e-03 sec ( 0.37%) 
+    Queuing Multipole MPI [Finish]:   0.00e+00 sec ( 0.00%) 
+    Check MPI Multipoles [precon] :   0.00e+00 sec ( 0.00%) 
+    Free MPI Multipoles           :   0.00e+00 sec ( 0.00%) 
+
+Breakdown of Spinning:
+	Note: may add up to >100% if there are multiple simultaneous reasons for spinning
+    Spinning                      :   3.42e-01 sec (58.89%) 
+        Checking preconditions        :   1.61e-01 sec (47.02%) 
+        Not enough RAM to load slabs  :   0.00e+00 sec ( 0.00%) 
+        Awaiting slab IO              :   5.73e-03 sec ( 1.67%) 
+        Awaiting GPU                  :   1.15e-01 sec (33.53%) 
+        Awaiting MPI Taylor Recv      :   1.57e-03 sec ( 0.46%) 
+        Awaiting MPI Taylor Send      :   1.53e-03 sec ( 0.45%) 
+        Awaiting MPI Taylor 2D        :   0.00e+00 sec ( 0.00%) 
+        Awaiting MPI Multipole Recv   :   2.53e-01 sec (74.10%) 
+        Awaiting MPI Multipole Send   :   1.98e-01 sec (57.99%) 
+        Awaiting MPI Multipole 2D     :   0.00e+00 sec ( 0.00%) 
+        Awaiting MPI Manifest Recv    :   0.00e+00 sec ( 0.00%) 
+        Awaiting MPI Neighbor Recv 2D :   0.00e+00 sec ( 0.00%) 
+        Awaiting MPI AccDens Recv 2D  :   0.00e+00 sec ( 0.00%) 
+    Spin Breakers                 :   3.42e-01 sec (58.89%) 
+        LoadForest                    :   2.00e-03 sec ( 0.58%) 
+        FetchSlabs                    :   2.94e-03 sec ( 0.86%) 
+        TransposePos                  :   8.39e-06 sec ( 0.00%) 
+        NearForce                     :   1.63e-05 sec ( 0.00%) 
+        SendAccDens                   :   2.56e-05 sec ( 0.01%) 
+        UnpackEnvSlab                 :   1.16e-01 sec (33.97%) 
+        TaylorTranspose               :   4.62e-04 sec ( 0.14%) 
+        SendTaylor                    :   5.51e-05 sec ( 0.02%) 
+        CheckTaylor                   :   6.01e-04 sec ( 0.18%) 
+        TaylorForce                   :   3.26e-05 sec ( 0.01%) 
+        KickPrevLastHalf              :   4.37e-05 sec ( 0.01%) 
+        KickNextFirstHalf             :   1.49e-03 sec ( 0.44%) 
+        MakeCellGroups                :   2.19e-05 sec ( 0.01%) 
+        FindCellGroupLinks            :   4.41e-04 sec ( 0.13%) 
+        DoGlobalGroups                :   1.37e-03 sec ( 0.40%) 
+        Output                        :   3.23e-05 sec ( 0.01%) 
+        Drift                         :   1.81e-05 sec ( 0.01%) 
+        NeighborSend                  :   6.90e-04 sec ( 0.20%) 
+        FinishParticles               :   1.41e-05 sec ( 0.00%) 
+        FinishMultipoles              :   2.02e-05 sec ( 0.01%) 
+        SendMultipole                 :   6.61e-05 sec ( 0.02%) 
+        CheckMultipole                :   1.42e-01 sec (41.39%) 
+        ReceiveManifest               :   1.87e-04 sec ( 0.05%) 
+        SendManifest                  :   7.37e-02 sec (21.55%) 
+
+Miscellaneous Timers:
+    Allocate Arena Memory         :   0.00e+00 sec ( 0.00%) 
+    Free Arena Memory             :   0.00e+00 sec ( 0.00%) 
+    Free SlabAccum Variables      :   1.34e-04 sec ( 0.02%) 
+    Write to IO FIFO              :   0.00e+00 sec ( 0.00%) 
+    Write to Log                  :   0.00e+00 sec ( 0.00%) 
+
+Memory Usage:
+    Max RSS (multistep)           :   39.97 GiB
+    Peak arena allocation         :    2.92 GiB
+    Peak NUMA arena allocation    :    0.34 GiB
+    TCMalloc held from system     :    7.97 GiB
+    GPU host buffer allocation    :   33.53 GiB
+    Peak NumaAlloc                :   33.87 GiB
+
+MinCellSize = 25, MaxCellSize = 277, RMS Fractional Overdensity = 8.7153e-02
+Rms |v| in simulation is 0.000201.
+
+========================================================================
+
+Considered 0.000000 G particles as active
+Found 0.000000 G cell groups (including boundary singlets)
+Used 0.000000 G pseudoParticles, 0.000000 G faceParticles, 0.000000 G faceGroups
+Found 0.000028 M links between groups.
+Found 0.000000 M global groups
+Longest GroupLink list was 0.000012 M, compared to 9.124931 M allocation (139.235397 MB)
+Widest L0 Diameter reached 1 slabs from the first
+Widest L0 group spans 0.000 cells (continuous, max over x/y/z)
+Largest Global Group has 0 particles
+L0 group multiplicity distribution:
+Total number of groups 0.000000 M
+Groups contain 0.000000 M particles
+Largest Group contains 0 particles
+L1 & L2 groups min size = 2
+L1 groups required 0.000000 G distances, 0.000000 G sorts, 0.000000 G centers, 0.000000 G cg
+L2 groups required 0.000000 G distances, 0.000000 G sorts, 0.000000 G centers, 0.000000 G cg
+L1 group multiplicity distribution:
+Total number of L1 groups considered 0.000000 M
+Total number of groups 0.000000 M
+Groups contain 0.000000 M particles
+Largest Group contains 0 particles
+L2 group multiplicity distribution:
+Total number of L2 groups considered 0.000000 M
+Total number of groups 0.000000 M
+Groups contain 0.000000 M particles
+Largest Group contains 0 particles
+map_collision formation.init N=0 grpsize=0
+map_collision formation.used N=0 grpsize=0 v=0 dens=0 dens_max=0 dens_min=0
+map_collision formation.used_mix N=0 grpsize=0 v=0 dens=0
+map_collision merger.init N=0 grpsize=0
+map_collision merger.used N=0 grpsize=0 v=0
+map_collision merger.used_mix N=0 grpsize=0 v=0
+map_collision accretion.init N=0 grpsize=0
+map_collision accretion.used N=0 grpsize=0 v=0
+map_collision accretion.used_mix N=0 grpsize=0 v=0
+map_collision mix.init N=0 grpsize=0
+Timings: 
+Finding Cell Groups:       0.0037 sec (10.90%)
+Creating Faces:            0.0090 sec (26.79%)
+Finding Group Links:       0.0029 sec ( 8.63%)
+Sort Links:                0.0000 sec ( 0.06%)
+Index Links:               0.0078 sec (23.28%)
+Indexing (P):                0.004988 cyc
+Defer Groups:              0.0036 sec (10.70%)
+Find Global Groups:        0.0054 sec (16.19%)
+Clear Deferrals:           0.0082 sec (24.38%)
+Index Global Groups:       0.0016 sec ( 4.70%)
+Gather Group Particles:    0.0017 sec ( 5.00%)
+Level 1 & 2 Processing:    0.0000 sec ( 0.00%)
+Level 1 FOF (P):                      0 sec ( 0.00%)
+Level 2 FOF (P):                      0 sec ( 0.00%)
+Level 1 Total (P):                    0 sec ( 0.00%)
+Level 1 Output:            0.0000 sec ( 0.00%)
+Scatter Aux:               0.0015 sec ( 4.44%)
+Scatter Group Particles:   0.0000 sec ( 0.00%)
+Total Booked Time:         0.0335 sec (7278.05 Mp/sec)
+
+========================================================================
+
+Convolution parameters:  RamAllocated =  0.0 MiB CacheSize = 41.0 MiB nreal_cores=82 blocksize=63 zwidth=10 order=8
+
+ConvolutionWallClock:  2.42e-02 seconds 
+	 Queuing MPI send/recv for Taylors                  : 0.00e+00 seconds
+	 FFT Planning                                       : 1.39e-04 seconds
+	 Array Swizzling                                    : 5.74e-03 seconds
+	 Convolution Arithmetic                             : 1.12e-02 seconds for 1.861 billion double precision operations per node
+	 Forward FFT Z Multipoles                           : 3.72e-03 seconds
+	 Inverse FFT Z Taylor                               : 2.71e-03 seconds
+Unaccounted remaining wallclock time               : 7.39e-04 seconds which is 3.0% 
+
+Summary: Fourier Transforms = 27%   Convolution Arithmetic = 46%   Array Swizzle = 24%    Disk IO = 0%     
+Set up (construct/destruct + alloc/free) = 0%   FFT planning = 1%   Queuing Taylor MPI send/recv = 0%    
+          Arithmetic rate = 1330 DGOPS --> rate per core = 2.0 DGOPS
+          [DGOPS == Double Precision Billion operations per second]
