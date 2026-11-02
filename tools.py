@@ -1,3 +1,6 @@
+import numpy as np
+from pycorr.correlation_function import JackknifeTwoPointCounter
+
 # split tables by quantiles
 
 #new plan: make a bunch of MASKS rather than saving all the sliced tables
@@ -11,36 +14,35 @@ def makeQuantileMasks(table, column, quantiles = [0,10,50,90,100]):
         column: string name of column by which to sort
         quantiles: percent quantiles. Must include 0 and 100. If there are n quantiles, you'll end up with n-1 tables.
     '''
-    #make the quantiles
-    sorted_indices = np.argsort(table[column])
-    quantile_indices = quantiles/100*len(table)
-    masks = [(sorted_indices >= quantile_indices[i]) and (sorted_indices < quantile_indices[i+1]) for i in range(len(quantiles) - 1)]
+    #rank of each row in the sorted column
+    ranks = np.argsort(np.argsort(table[column]))
+    quantile_indices = np.asarray(quantiles)*len(table)/100
+    masks = [(ranks >= quantile_indices[i]) & (ranks < quantile_indices[i+1]) for i in range(len(quantiles) - 1)]
     return masks
 
 def makeNDivMasks(table, column, ndivs):
     '''
     Description
-        sorts a table and cuts into quantiles by a certain column
+        sorts a table and cuts into ndivs equal-size quantiles by a certain column
     Arguments
         table: Astropy table to cut
         column: string name of column by which to sort
-        quantiles: percent quantiles. Must include 0 and 100. If there are n quantiles, you'll end up with n-1 tables.
+        ndivs: number of divisions. You'll end up with ndivs masks.
     '''
-    #make the quantiles
-    argsorted_indices = np.argsort(table[column])
-    sorted_indices = np.argsort(argsorted_indices)
-    div_indices = np.arange(ndivs+1)/ndivs*len(table)
-    masks = [(sorted_indices >= div_indices[i]) & (sorted_indices < div_indices[i+1]) for i in range(ndivs)]
-    return masks
+    return makeQuantileMasks(table, column, np.arange(ndivs+1)*100/ndivs)
 
 def cutTableValues(table, column, values):
     '''
+    Description
+        makes masks selecting rows with values[i] <= table[column] < values[i+1]
+    Arguments
+        table: Astropy table to cut
+        column: string name of column to cut on
+        values: bin edges. If there are n values, you'll end up with n-1 masks.
     '''
-    #make the quantiles
     def makeMask(lowerbound, upperbound):
-        mask = (table[column] >= lowerbound) and (table[column] < upperbound)
-        return mask
-    masks = [makeMask(column, values[i], values[i+1]) for i in range(len(values)-1)]
+        return (table[column] >= lowerbound) & (table[column] < upperbound)
+    masks = [makeMask(values[i], values[i+1]) for i in range(len(values)-1)]
     return masks
 '''
 def sliceTableRADEC(table, ndivsRA, ndivsDEC):
@@ -67,13 +69,38 @@ def quiltMasks(table,ndivsRA,ndivsDEC):
     masklist = [makeMaskFromIndices(ra_dec_split_indices[i]) for i in range(ndivsRA*ndivsDEC)]
     #we don't care about keeping track of where our divisions are
     return masklist
-    
+
+def quiltMasksFromReference(reftable, tables, ndivsRA, ndivsDEC):
+    '''
+    Description
+        like quiltMasks, but the RA/DEC boundaries are computed once from reftable and applied to every
+        table, so jackknife region k covers the same patch of sky in every catalog
+    Arguments
+        reftable: Astropy table whose RA/DEC quantiles define the region boundaries
+        tables: list of Astropy tables to split
+        ndivsRA, ndivsDEC: number of divisions in RA, and in DEC within each RA strip
+    Returns
+        list (one entry per table) of lists of ndivsRA*ndivsDEC boolean masks
+    '''
+    ra_edges = np.quantile(reftable["RA"], np.arange(ndivsRA+1)/ndivsRA)
+    ref_ra_bin = np.clip(np.digitize(reftable["RA"], ra_edges[1:-1]), 0, ndivsRA-1)
+    dec_edges = [np.quantile(reftable["DEC"][ref_ra_bin == i], np.arange(ndivsDEC+1)/ndivsDEC) for i in range(ndivsRA)]
+    def makeMasks(table):
+        ra_bin = np.digitize(table["RA"], ra_edges[1:-1])
+        dec_bin = np.zeros(len(ra_bin), dtype=int)
+        for i in range(ndivsRA):
+            in_strip = ra_bin == i
+            dec_bin[in_strip] = np.digitize(table["DEC"][in_strip], dec_edges[i][1:-1])
+        labels = ra_bin*ndivsDEC + dec_bin
+        return [labels == k for k in range(ndivsRA*ndivsDEC)]
+    return [makeMasks(table) for table in tables]
+
 
 def getpos(tab,mask = None):
-    if mask is not None:
-        pos = [np.array(tab['RA'][0]),np.array(tab['DEC'][0]),np.array(tab['dist'][0])]
+    if mask is None:
+        pos = [np.array(tab['RA']),np.array(tab['DEC']),np.array(tab['dist'])]
     else:
-        pos = [np.array(tab['RA'][mask][0]),np.array(tab['DEC'][mask][0]),np.array(tab['dist'][mask][0])]
+        pos = [np.array(tab['RA'][mask]),np.array(tab['DEC'][mask]),np.array(tab['dist'][mask])]
     return pos
 
 def boolMasksToIntLabels(boolmasks):
@@ -115,35 +142,38 @@ def subsampleCounts(D1tab, D2tab, D1masks_jack, D2masks_jack, D2masks_samples, s
         D2counts.append(D2count)
     return D2counts
 
-def xiTimesRDavisPeebles(D1D2counts,D1R1counts,nD2,nR1,pimax,rcenters):
-    xi = [(D1D2counts[j][0]*nR1/(D1R1counts[j][0]*nD2) - 1)*rcenters[j]*2*pimax for j in range(len(D1D2counts))]
-    for i in range(len(xi)):
-        if xi[i] > 1e10:
-            xi[i] = 0
-    return np.nan_to_num(np.array(xi),nan = 0)
+def wpDavisPeebles(D1D2s,D1R1):
+    '''
+    Description
+        Davis-Peebles projected correlation function wp(rp) from co-added D1D2 counters and one D1R1 counter.
+        Normalizations come from each counter's wnorm (N1*N2), so they always match the counts being summed,
+        including for jackknife realizations with a region removed.
+    Arguments
+        D1D2s: list of pycorr counters (or realizations) to co-add
+        D1R1: pycorr counter (or realization) for data x randoms
+    '''
+    D1D2norm = np.sum([D1D2.wcounts for D1D2 in D1D2s],axis = 0)/np.sum([D1D2.wnorm for D1D2 in D1D2s])
+    D1R1norm = D1R1.wcounts/D1R1.wnorm
+    with np.errstate(divide = 'ignore', invalid = 'ignore'):
+        xi = np.where(D1R1norm > 0, D1D2norm/D1R1norm - 1, np.nan)
+    #integrate over pi bins
+    dpi = np.diff(D1R1.edges[1])
+    return np.sum(xi*dpi,axis = 1)
 
-def xiDavisPeebles(D1D2counts,D1R1counts,nD2,nR1,pimax):
-    xi = [(D1D2counts[j][0]*nR1/(D1R1counts[j][0]*nD2) - 1)*2*pimax for j in range(len(D1D2counts))]
-    return np.array(xi)
-
-def DavisPeebles2PCFJackknifeCoadd(D1D2names,D1R1name,nD2,nR1,pimax = 40):
+def DavisPeebles2PCFJackknifeCoadd(D1D2names,D1R1name):
+    '''
+    Returns rp bin centers, rp*wp(rp), and jackknife error on rp*wp(rp). Bins with no D1R1 pairs are NaN.
+    '''
     D1D2s = [JackknifeTwoPointCounter.load("corrfunc/"+D1D2names[i]+".npy") for i in range(len(D1D2names))]
     D1R1 = JackknifeTwoPointCounter.load("corrfunc/"+D1R1name+".npy")
-    njack = D1R1.nrealizations
+    realizations = D1R1.realizations
+    njack = len(realizations)
     edges = D1D2s[0].edges[0]
     rcenters = np.array([(edges[j]+edges[j+1])/2 for j in range(len(edges)-1)])
-    #get overall counts for estimator
-    D1D2scounts = np.array([D1D2s[i].wcounts for i in range(len(D1D2names))])
-    D1D2counts = np.sum(D1D2scounts,axis = 0)
-    D1R1counts = D1R1.wcounts
-    nD2tot = np.sum(nD2)
-    DavisPeeblesEstimators = xiTimesRDavisPeebles(D1D2counts,D1R1counts,nD2tot,nR1,pimax,rcenters)
+    DavisPeeblesEstimators = rcenters*wpDavisPeebles(D1D2s,D1R1)
     jacksamples = []
-    for i in range(D1D2s[0].nrealizations):
-        D1D2scounts = np.array([D1D2s[j].realization(i+1).wcounts for j in range(len(D1D2names))])
-        D1D2counts = np.sum(D1D2scounts,axis = 0)
-        D1R1counts = D1R1.realization(i+1).wcounts
-        xiJackknife = xiTimesRDavisPeebles(D1D2counts,D1R1counts,nD2tot,nR1,pimax,rcenters)
+    for ii in realizations:
+        xiJackknife = rcenters*wpDavisPeebles([D1D2.realization(ii) for D1D2 in D1D2s],D1R1.realization(ii))
         jacksamples.append(xiJackknife)
     #get jackknife error
     differencefromcenter = np.array([jack - DavisPeeblesEstimators for jack in jacksamples])
