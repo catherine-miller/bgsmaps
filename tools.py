@@ -1,10 +1,6 @@
 import numpy as np
 from pycorr.correlation_function import JackknifeTwoPointCounter
 
-# split tables by quantiles
-
-#new plan: make a bunch of MASKS rather than saving all the sliced tables
-
 def makeQuantileMasks(table, column, quantiles = [0,10,50,90,100]):
     '''
     Description
@@ -95,12 +91,40 @@ def quiltMasksFromReference(reftable, tables, ndivsRA, ndivsDEC):
         return [labels == k for k in range(ndivsRA*ndivsDEC)]
     return [makeMasks(table) for table in tables]
 
+def boxMasks(tables,limits,ndivs = [3,3,3]):
+    '''
+    Description
+        Cuts a cubic (or rectangular) mock into smaller rectangular prisms.
+    Arguments
+        tables: tables for which to produce masks
+        limits: list of lists of box boundaries (in distance units such as Mpc/h) [[xmin, xmax],[ymin,ymax],[zmin,zmax]]
+        ndivs: number of divisions in x, y, z
+    Returns
+        list (one entry per table) of lists of boolean masks
+    '''
+    ndivsx,ndivsy,ndivsz = ndivs
+    xlim,ylim,zlim=limits
+    x_edges = np.linspace(*xlim,num = ndivs[0] + 1)
+    y_edges = np.linspace(*ylim,num = ndivs[1] + 1)
+    z_edges = np.linspace(*zlim,num = ndivs[2] + 1)
+    def makeMasks(table):
+        x_bin = np.digitize(table["x"], x_edges[1:-1])
+        y_bin = np.digitize(table["y"], y_edges[1:-1])
+        z_bin = np.digitize(table["z"], z_edges[1:-1])
+        labels = x_bin*ndivsy*ndivsz + y_bin*ndivsz + z_bin
+        return [labels == k for k in range(ndivsx*ndivsy*ndivsz)]
+    return [makeMasks(table) for table in tables]
 
-def getpos(tab,mask = None):
+    
+def getpos(tab,position_type = 'rdd',mask = None):
+    if position_type == 'rdd':
+        dims = ['RA','DEC','dist']
+    if position_type == 'xyz':
+        dims = ['x','y','z']
     if mask is None:
-        pos = [np.array(tab['RA']),np.array(tab['DEC']),np.array(tab['dist'])]
+        pos = [np.array(tab[dims[0]]),np.array(tab[dims[1]]),np.array(tab[dims[2]])]
     else:
-        pos = [np.array(tab['RA'][mask]),np.array(tab['DEC'][mask]),np.array(tab['dist'][mask])]
+        pos = [np.array(tab[dims[0]][mask]),np.array(tab[dims[1]][mask]),np.array(tab[dims[2]][mask])]
     return pos
 
 def boolMasksToIntLabels(boolmasks):
@@ -108,12 +132,12 @@ def boolMasksToIntLabels(boolmasks):
     return np.sum(samples_int,axis = 0)
 
 def getJackknifeCounts(reftab, sampletab, refmasks_jack, samplemasks_jack, stringname, samplemask = None, 
-                       edges = [np.logspace(-2.5,0.5,num=100),[-40,40]]):
-    refpos = getpos(reftab)
+                       edges = [np.linspace(1,15,num=100),[-40,40]],position_type = 'rdd'):
+    refpos = getpos(reftab,position_type=position_type)
     if samplemask is not None:
-        samplepos = getpos(sampletab[samplemask])
+        samplepos = getpos(sampletab[samplemask],position_type = position_type)
     else:
-        samplepos = getpos(sampletab)
+        samplepos = getpos(sampletab,position_type = position_type)
     D2counts = len(samplepos[0])
     #ranpos = getpos(randomtab)
     if samplemask is not None:
@@ -124,7 +148,7 @@ def getJackknifeCounts(reftab, sampletab, refmasks_jack, samplemasks_jack, strin
     #randoms_samples1 = boolMasksToIntLabels(randommasks_jack)
     counter = JackknifeTwoPointCounter('rppi', edges, positions1=refpos, samples1=samples1,
                                      positions2=samplepos, samples2=samples2,
-                                     position_type = 'rdd')
+                                     position_type = position_type)
     '''
     result = TwoPointCorrelationFunction('rppi', edges, data_positions1=refpos, data_samples1=samples1,
                                      data_positions2=samplepos, data_samples2=samples2,
@@ -133,12 +157,13 @@ def getJackknifeCounts(reftab, sampletab, refmasks_jack, samplemasks_jack, strin
     counter.save("corrfunc/BGSxquantile_"+stringname)   
     return D2counts
 
-def subsampleCounts(D1tab, D2tab, D1masks_jack, D2masks_jack, D2masks_samples, stringnames):
+def subsampleCounts(D1tab, D2tab, D1masks_jack, D2masks_jack, D2masks_samples, stringnames, edges = [np.linspace(1,15,num=100),[-40,40]],position_type = 'rdd'):
     D2counts = []
     for i in range(len(D2masks_samples)): 
         D2mask = D2masks_samples[i]
         stringname = stringnames[i]
-        D2count = getJackknifeCounts(D1tab,D2tab,D1masks_jack,D2masks_jack,stringname,samplemask = D2mask)
+        D2count = getJackknifeCounts(D1tab,D2tab,D1masks_jack,D2masks_jack,stringname,samplemask = D2mask,
+                                     edges = edges,position_type = position_type)
         D2counts.append(D2count)
     return D2counts
 
