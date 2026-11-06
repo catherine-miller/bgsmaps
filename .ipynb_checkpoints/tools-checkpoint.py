@@ -1,5 +1,6 @@
 import numpy as np
 from pycorr.correlation_function import JackknifeTwoPointCounter
+from astropy.cosmology import Planck18 as cosmo
 
 def makeQuantileMasks(table, column, quantiles = [0,10,50,90,100]):
     '''
@@ -131,13 +132,21 @@ def boolMasksToIntLabels(boolmasks):
     samples_int = np.array([(boolmasks[i]).astype(int)*(i+1) for i in range(len(boolmasks))])
     return np.sum(samples_int,axis = 0)
 
+def getWeights(tab):
+    return np.array(tab['BITWEIGHTS']).T
+
 def getJackknifeCounts(reftab, sampletab, refmasks_jack, samplemasks_jack, stringname, samplemask = None, 
-                       edges = [np.linspace(1,15,num=100),[-40,40]],position_type = 'rdd'):
+                       edges = [np.linspace(1,15,num=100),[-40,40]],position_type = 'rdd',los='midpoint',
+                       useD1weights=False,useD2weights=False):
     refpos = getpos(reftab,position_type=position_type)
     if samplemask is not None:
         samplepos = getpos(sampletab[samplemask],position_type = position_type)
+        if useD2weights: D2weights = getWeights(sampletab[samplemask])
+        else: D2weights = None
     else:
         samplepos = getpos(sampletab,position_type = position_type)
+        if useD2weights: D2weights = getWeights(sampletab)
+        else: D2weights = None
     D2counts = len(samplepos[0])
     #ranpos = getpos(randomtab)
     if samplemask is not None:
@@ -146,28 +155,27 @@ def getJackknifeCounts(reftab, sampletab, refmasks_jack, samplemasks_jack, strin
     samples1 = boolMasksToIntLabels(refmasks_jack)
     samples2 = boolMasksToIntLabels(samplemasks_jack)
     #randoms_samples1 = boolMasksToIntLabels(randommasks_jack)
+    if useD1weights: D1weights = getWeights(reftab)
+    else: D1weights = None   
     counter = JackknifeTwoPointCounter('rppi', edges, positions1=refpos, samples1=samples1,
                                      positions2=samplepos, samples2=samples2,
-                                     position_type = position_type)
-    '''
-    result = TwoPointCorrelationFunction('rppi', edges, data_positions1=refpos, data_samples1=samples1,
-                                     data_positions2=samplepos, data_samples2=samples2,
-                                     position_type = 'rdd')
-    '''
+                                     position_type = position_type,los=los,weights1=D1weights,weights2=D2weights)
+
     counter.save("corrfunc/BGSxquantile_"+stringname)   
     return D2counts
 
-def subsampleCounts(D1tab, D2tab, D1masks_jack, D2masks_jack, D2masks_samples, stringnames, edges = [np.linspace(1,15,num=100),[-40,40]],position_type = 'rdd'):
+def subsampleCounts(D1tab, D2tab, D1masks_jack, D2masks_jack, D2masks_samples, stringnames, 
+                    edges = [np.linspace(1,15,num=100),[-40,40]],position_type = 'rdd',los='midpoint',useD1weights = False, useD2weights = False):
     D2counts = []
     for i in range(len(D2masks_samples)): 
         D2mask = D2masks_samples[i]
         stringname = stringnames[i]
         D2count = getJackknifeCounts(D1tab,D2tab,D1masks_jack,D2masks_jack,stringname,samplemask = D2mask,
-                                     edges = edges,position_type = position_type)
+                                     edges = edges,position_type = position_type,los=los, useD1weights = useD1weights, useD2weights = useD2weights)
         D2counts.append(D2count)
     return D2counts
 
-def wpDavisPeebles(D1D2s,D1R1):
+def wpDavisPeebles(D1D2s,D1R1,dividebyh=False):
     '''
     Description
         Davis-Peebles projected correlation function wp(rp) from co-added D1D2 counters and one D1R1 counter.
@@ -176,6 +184,7 @@ def wpDavisPeebles(D1D2s,D1R1):
     Arguments
         D1D2s: list of pycorr counters (or realizations) to co-add
         D1R1: pycorr counter (or realization) for data x randoms
+        dividebyh: if input units are Mpc rather than Mpc/h, divide by little h
     '''
     D1D2norm = np.sum([D1D2.wcounts for D1D2 in D1D2s],axis = 0)/np.sum([D1D2.wnorm for D1D2 in D1D2s])
     D1R1norm = D1R1.wcounts/D1R1.wnorm
@@ -183,11 +192,14 @@ def wpDavisPeebles(D1D2s,D1R1):
         xi = np.where(D1R1norm > 0, D1D2norm/D1R1norm - 1, np.nan)
     #integrate over pi bins
     dpi = np.diff(D1R1.edges[1])
-    return np.sum(xi*dpi,axis = 1)
+    if dividebyh: return np.sum(xi*dpi,axis = 1)*cosmo.h**2 #I think?
+    else: return np.sum(xi*dpi,axis = 1) #I think?
 
-def DavisPeebles2PCFJackknifeCoadd(D1D2names,D1R1name):
+def DavisPeebles2PCFJackknifeCoadd(D1D2names,D1R1name,dividebyh = False):
     '''
     Returns rp bin centers, rp*wp(rp), and jackknife error on rp*wp(rp). Bins with no D1R1 pairs are NaN.
+    Arguments
+        dividebyh: True if input units are Mpc rather than Mpc/h.
     '''
     D1D2s = [JackknifeTwoPointCounter.load("corrfunc/"+D1D2names[i]+".npy") for i in range(len(D1D2names))]
     D1R1 = JackknifeTwoPointCounter.load("corrfunc/"+D1R1name+".npy")
@@ -195,10 +207,11 @@ def DavisPeebles2PCFJackknifeCoadd(D1D2names,D1R1name):
     njack = len(realizations)
     edges = D1D2s[0].edges[0]
     rcenters = np.array([(edges[j]+edges[j+1])/2 for j in range(len(edges)-1)])
-    DavisPeeblesEstimators = rcenters*wpDavisPeebles(D1D2s,D1R1)
+    if dividebyh: rcenters = rcenters/cosmo.h
+    DavisPeeblesEstimators = rcenters*wpDavisPeebles(D1D2s,D1R1,dividebyh=dividebyh)
     jacksamples = []
     for ii in realizations:
-        xiJackknife = rcenters*wpDavisPeebles([D1D2.realization(ii) for D1D2 in D1D2s],D1R1.realization(ii))
+        xiJackknife = rcenters*wpDavisPeebles([D1D2.realization(ii) for D1D2 in D1D2s],D1R1.realization(ii),dividebyh=dividebyh)
         jacksamples.append(xiJackknife)
     #get jackknife error
     differencefromcenter = np.array([jack - DavisPeeblesEstimators for jack in jacksamples])
