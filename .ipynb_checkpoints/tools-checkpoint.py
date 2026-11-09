@@ -133,7 +133,7 @@ def boolMasksToIntLabels(boolmasks):
     return np.sum(samples_int,axis = 0)
 
 def getWeights(tab):
-    return np.array(tab['BITWEIGHTS']).T
+    return tab['WEIGHT']
 
 def getJackknifeCounts(reftab, sampletab, refmasks_jack, samplemasks_jack, stringname, samplemask = None, 
                        edges = [np.linspace(1,15,num=100),[-40,40]],position_type = 'rdd',los='midpoint',
