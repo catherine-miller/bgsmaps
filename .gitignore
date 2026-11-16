@@ -4,3 +4,8 @@ exampledata/
 maps_072926/
 corrfunc/
 correlationfunction/
+__pycache__/
+.ipynb_checkpoints/
+.virtual_documents/
+*.tmp.npy
+*.fits.tmp

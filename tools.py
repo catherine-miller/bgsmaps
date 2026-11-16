@@ -1,3 +1,4 @@
+import os
 import numpy as np
 from pycorr.correlation_function import JackknifeTwoPointCounter
 from astropy.cosmology import Planck18 as cosmo
@@ -138,9 +139,12 @@ def getWeights(tab):
 
 def getJackknifeCounts(reftab, sampletab, refmasks_jack, samplemasks_jack, stringname, samplemask = None,
                        edges = [np.linspace(1,15,num=100),[-40,40]],position_type = 'rdd',los='midpoint',
-                       useD1weights=False,useD2weights=False,mode='rppi',include_RSD = False):
+                       useD1weights=False,useD2weights=False,mode='rppi',include_RSD = False,
+                       outpath=None,nthreads=None):
     '''
     mode: pycorr counting mode. 'rppi' (edges = [rp edges, pi edges]) for wp, or 's' (edges = s edges only) for the monopole.
+    outpath: where to save the counter. Defaults to corrfunc/BGSxquantile_<stringname>.npy (old naming).
+    nthreads: number of threads for pycorr (default: pycorr's default).
     '''
     refpos = getpos(reftab,position_type=position_type,include_RSD = include_RSD)
     if samplemask is not None:
@@ -161,23 +165,30 @@ def getJackknifeCounts(reftab, sampletab, refmasks_jack, samplemasks_jack, strin
     #randoms_samples1 = boolMasksToIntLabels(randommasks_jack)
     if useD1weights: D1weights = getWeights(reftab)
     else: D1weights = None   
+    threadkw = {} if nthreads is None else {'nthreads': nthreads}
     counter = JackknifeTwoPointCounter(mode, edges, positions1=refpos, samples1=samples1,
                                      positions2=samplepos, samples2=samples2,
-                                     position_type = position_type,los=los,weights1=D1weights,weights2=D2weights)
+                                     position_type = position_type,los=los,weights1=D1weights,weights2=D2weights,
+                                     **threadkw)
 
-    counter.save("corrfunc/BGSxquantile_"+stringname)   
+    if outpath is None: outpath = "corrfunc/BGSxquantile_"+stringname
+    counter.save(outpath)
     return D2counts
 
 def subsampleCounts(D1tab, D2tab, D1masks_jack, D2masks_jack, D2masks_samples, stringnames, 
                     edges = [np.linspace(1,15,num=100),[-40,40]],position_type = 'rdd',los='midpoint',useD1weights = False, useD2weights = False,
-                    mode='rppi',include_RSD = False):
+                    mode='rppi',include_RSD = False,outpaths=None,nthreads=None):
+    '''
+    outpaths: optional list of save paths, one per sample (overrides the stringnames-based naming)
+    '''
     D2counts = []
     for i in range(len(D2masks_samples)):
         D2mask = D2masks_samples[i]
-        stringname = stringnames[i]
+        stringname = stringnames[i] if stringnames is not None else None
+        outpath = outpaths[i] if outpaths is not None else None
         D2count = getJackknifeCounts(D1tab,D2tab,D1masks_jack,D2masks_jack,stringname,samplemask = D2mask,
                                      edges = edges,position_type = position_type,los=los, useD1weights = useD1weights, useD2weights = useD2weights,
-                                     mode = mode,include_RSD = include_RSD)
+                                     mode = mode,include_RSD = include_RSD,outpath = outpath,nthreads = nthreads)
         D2counts.append(D2count)
     return D2counts
 
@@ -229,16 +240,38 @@ def wpDavisPeebles(D1D2s,D1R1,dividebyh=False):
     if dividebyh: return np.sum(xi*dpi,axis = 1)*cosmo.h**2 #I think?
     else: return np.sum(xi*dpi,axis = 1) #I think?
 
-def DavisPeebles2PCFJackknifeCoadd(D1D2names,D1R1name,dividebyh = False,statistic = 'wp'):
+def checkMatchingTags(paths):
+    '''
+    Raise if pipeline counts files (see provenance.py) don't all share the same cat- and cnt- tags,
+    i.e. were made from different catalog versions or different counting code.
+    '''
+    import provenance
+    parsed = [provenance.parse_counts_path(p) for p in paths]
+    bad = [p for p, t in zip(paths, parsed) if t is None]
+    if bad: raise ValueError("not pipeline counts files (no cat-/cnt- tags): {}".format(bad))
+    for key in ['cat', 'cnt']:
+        values = {t[key] for t in parsed}
+        if len(values) > 1:
+            raise ValueError("counts files have different {}- tags {}; they come from different versions:\n  {}".format(
+                key, sorted(values), "\n  ".join(os.path.basename(p) for p in paths)))
+
+def DavisPeebles2PCFJackknifeCoadd(D1D2names,D1R1name,dividebyh = False,statistic = 'wp',paths = False):
     '''
     Returns bin centers, the statistic, and its jackknife error. Bins with no D1R1 pairs are NaN.
     Arguments
         dividebyh: True if input units are Mpc rather than Mpc/h.
         statistic: 'wp' returns rp*wp(rp) (counters in mode 'rppi');
                    'xi0' returns s^2*xi0(s) (counters in mode 's').
+        paths: if True, D1D2names and D1R1name are full paths to pipeline counts files (from run_counts.py);
+               they must all share the same cat- and cnt- tags. If False, old naming: corrfunc/<name>.npy.
     '''
-    D1D2s = [JackknifeTwoPointCounter.load("corrfunc/"+D1D2names[i]+".npy") for i in range(len(D1D2names))]
-    D1R1 = JackknifeTwoPointCounter.load("corrfunc/"+D1R1name+".npy")
+    if paths:
+        checkMatchingTags(list(D1D2names) + [D1R1name])
+        D1D2s = [JackknifeTwoPointCounter.load(p) for p in D1D2names]
+        D1R1 = JackknifeTwoPointCounter.load(D1R1name)
+    else:
+        D1D2s = [JackknifeTwoPointCounter.load("corrfunc/"+D1D2names[i]+".npy") for i in range(len(D1D2names))]
+        D1R1 = JackknifeTwoPointCounter.load("corrfunc/"+D1R1name+".npy")
     realizations = D1R1.realizations
     njack = len(realizations)
     edges = D1D2s[0].edges[0]
