@@ -6,11 +6,13 @@ that produced it. Stages refuse to run when that code has uncommitted changes, s
 identifies exactly what made a file.
 
     bgs_catalog.py            -> <CATALOG_DIR>/bgs_fsf_<B>.fits, bgs_fsf_<B>_ran<i>.fits
-    run_counts.py + tools.py  -> corrfunc/<label>_{DD,DR}_cat-<B|M>_cnt-<C>[_q<i>].npy
+    angular_weights.py        -> <CATALOG_DIR>/wang_<A>.npz
+    run_counts.py + tools.py  -> corrfunc/<label>_{DD,DR}_cat-<B|M>_cnt-<C>[_ang-<A>][_q<i>].npy
     plotting notebook         -> figs/<base>_cat-<...>_cnt-<C>_plot-<P>.png
 
 See which versions exist on disk:
     python provenance.py list bgs_fsf
+    python provenance.py list wang
     python provenance.py list corrfunc/bgs_smlim_s
 '''
 import os
@@ -19,6 +21,7 @@ import re
 import sys
 import glob
 import subprocess
+import numpy as np
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 CATALOG_DIR = os.environ.get("BGSMAPS_CATALOG_DIR", "/pscratch/sd/c/crmiller/catalogs")
@@ -31,6 +34,7 @@ STAGE_FILES = {
     "cat_bgs": ["bgs_catalog.py"],
     "cat_map": ["map_tools.py"],
     "cnt": ["run_counts.py", "tools.py"],
+    "ang": ["angular_weights.py"],
 }
 
 class DirtyTreeError(RuntimeError):
@@ -106,8 +110,17 @@ def stage_hash(stage):
     return file_hash(STAGE_FILES[stage])
 
 def current_tags():
-    '''Hashes the current checked-out code gives each stage: {'cat_bgs': B, 'cat_map': M, 'cnt': C}.'''
-    return {stage: stage_hash(stage) for stage in STAGE_FILES}
+    '''
+    Hashes the current checked-out code gives each stage: {'cat_bgs': B, 'cat_map': M, 'cnt': C, 'ang': A}.
+    A stage whose files have never been committed (or don't exist) gets None.
+    '''
+    tags = {}
+    for stage in STAGE_FILES:
+        try:
+            tags[stage] = stage_hash(stage)
+        except Exception:
+            tags[stage] = None
+    return tags
 
 def commit_info(h):
     '''(date, subject) of a commit, or ('?', 'unknown commit') if git doesn't know it.'''
@@ -123,35 +136,46 @@ def catalog_path(h, ran=None, name="bgs_fsf"):
     base = "{}_{}".format(name, h) if ran is None else "{}_{}_ran{}".format(name, h, ran)
     return os.path.join(CATALOG_DIR, base + ".fits")
 
-def counts_path(label, kind, cat, cnt, quantile=None):
-    '''kind is 'DD' or 'DR'.'''
+def wang_path(h):
+    '''angular upweights w(theta) made by angular_weights.py at commit h'''
+    return os.path.join(CATALOG_DIR, "wang_{}.npz".format(h))
+
+def load_wang(h):
+    '''(sep, weight) angular upweights from angular_weights.py commit h, in the form pycorr accepts as twopoint_weights'''
+    w = np.load(wang_path(h))
+    return w["sep"], w["weight"]
+
+def counts_path(label, kind, cat, cnt, quantile=None, ang=None):
+    '''kind is 'DD' or 'DR'. ang: hash of the angular weights used, if any.'''
     base = "{}_{}_cat-{}_cnt-{}".format(label, kind, cat, cnt)
+    if ang is not None: base += "_ang-{}".format(ang)
     if quantile is not None: base += "_q{}".format(quantile)
     return os.path.join(CORRFUNC_DIR, base + ".npy")
 
-_COUNTS_RE = re.compile(r"_(DD|DR)_cat-([0-9a-f]+)_cnt-([0-9a-f]+)(?:_q(\d+))?\.npy$")
+_COUNTS_RE = re.compile(r"_(DD|DR)_cat-([0-9a-f]+)_cnt-([0-9a-f]+)(?:_ang-([0-9a-f]+))?(?:_q(\d+))?\.npy$")
 
 def parse_counts_path(path):
-    '''{'kind', 'cat', 'cnt', 'quantile'} from a counts filename, or None if it isn't one.'''
+    '''{'kind', 'cat', 'cnt', 'ang', 'quantile'} from a counts filename, or None if it isn't one. ang is None if absent.'''
     m = _COUNTS_RE.search(os.path.basename(path))
     if m is None: return None
-    kind, cat, cnt, q = m.groups()
-    return dict(kind=kind, cat=cat, cnt=cnt, quantile=None if q is None else int(q))
+    kind, cat, cnt, ang, q = m.groups()
+    return dict(kind=kind, cat=cat, cnt=cnt, ang=ang, quantile=None if q is None else int(q))
 
-def count_files(label, kind="DD", cat=None, cnt=None, current=False, verbose=True):
+def count_files(label, kind="DD", cat=None, cnt=None, ang=None, current=False, verbose=True):
     '''
     Counts files of one kind ('DD' or 'DR') for a measurement label, sorted by quantile.
 
     By default, uses the most recently written version on disk: among the (cat, cnt) versions that have both
     DD and DR files, the one whose newest file is most recent. DD and DR calls therefore pick the same version.
-    cat / cnt: restrict to versions with these hashes (e.g. to plot an older version)
+    cat / cnt / ang: restrict to versions with these hashes (e.g. to plot an older version)
     current: restrict to the versions matching the current code (cnt = current counts hash,
-             cat = current BGS or MAP catalog hash)
+             cat = current BGS or MAP catalog hash, ang = current angular-weights hash if the counts use them)
     '''
     if current:
         tags = current_tags()
         cnt = cnt or tags["cnt"]
         cats = [cat] if cat else [tags["cat_bgs"], tags["cat_map"]]
+        ang = ang or tags["ang"]
     else:
         cats = [cat] if cat else None
 
@@ -161,7 +185,8 @@ def count_files(label, kind="DD", cat=None, cnt=None, current=False, verbose=Tru
         if t is None: continue
         if cats is not None and t["cat"] not in cats: continue
         if cnt is not None and t["cnt"] != cnt: continue
-        versions.setdefault((t["cat"], t["cnt"]), []).append((f, t))
+        if ang is not None and t["ang"] is not None and t["ang"] != ang: continue
+        versions.setdefault((t["cat"], t["cnt"], t["ang"]), []).append((f, t))
     complete = {v: fs for v, fs in versions.items() if {t["kind"] for f, t in fs} == {"DD", "DR"}}
     if not complete:
         raise FileNotFoundError("no complete (DD + DR) counts for '{}' with cat={} cnt={}{}. Run: python run_counts.py {}\n"
@@ -170,7 +195,8 @@ def count_files(label, kind="DD", cat=None, cnt=None, current=False, verbose=Tru
     newest = max(complete, key=lambda v: max(os.path.getmtime(f) for f, t in complete[v]))
     if verbose:
         date, message = commit_info(newest[1])
-        print("{} {}: cat-{} cnt-{} ({}, {})".format(label, kind, newest[0], newest[1], date, message))
+        angstr = "" if newest[2] is None else " ang-{}".format(newest[2])
+        print("{} {}: cat-{} cnt-{}{} ({}, {})".format(label, kind, newest[0], newest[1], angstr, date, message))
     files = [(f, t) for f, t in complete[newest] if t["kind"] == kind]
     return [f for f, t in sorted(files, key=lambda ft: ft[1]["quantile"] or 0)]
 
@@ -188,8 +214,10 @@ def plot_name(base, count_files, notebook, ext="png"):
         raise ValueError("not all files are pipeline counts files: {}".format(count_files))
     cats = "-".join(sorted({p["cat"] for p in parsed}))
     cnts = "-".join(sorted({p["cnt"] for p in parsed}))
+    angs = sorted({p["ang"] for p in parsed if p["ang"] is not None})
+    angstr = "_ang-" + "-".join(angs) if angs else ""
     os.makedirs(FIG_DIR, exist_ok=True)
-    return os.path.join(FIG_DIR, "{}_cat-{}_cnt-{}_plot-{}.{}".format(base, cats, cnts, P, ext))
+    return os.path.join(FIG_DIR, "{}_cat-{}_cnt-{}{}_plot-{}.{}".format(base, cats, cnts, angstr, P, ext))
 
 # ---- listing what's on disk ----------------------------------------------------------------
 
@@ -206,10 +234,11 @@ def available(prefix):
         pattern = base + "_D[DR]_cat-*.npy"
     else:
         base = os.path.join(CATALOG_DIR, prefix)
-        pattern = base + "_*.fits"
+        pattern = base + "_*"
     groups = {}
     for f in glob.glob(pattern):
         name = os.path.basename(f)
+        if ".tmp." in name: continue
         tags = tuple(_HASH_RE.findall(name[len(os.path.basename(base)):]))
         if tags: groups.setdefault(tags, []).append(name)
     try:
@@ -218,18 +247,21 @@ def available(prefix):
         cur = None
     def is_current(tags):
         if cur is None: return False
-        if len(tags) == 1: return tags[0] == cur["cat_bgs"]  # catalog file
-        cat, cnt = tags[:2]                                   # counts file
-        return cnt == cur["cnt"] and cat in (cur["cat_bgs"], cur["cat_map"])
+        if len(tags) == 1:                                    # catalog or angular-weights file
+            return tags[0] == (cur["ang"] if os.path.basename(base) == "wang" else cur["cat_bgs"])
+        cat, cnt = tags[:2]                                   # counts file (tags[2] = ang, if present)
+        ok = cnt == cur["cnt"] and cat in (cur["cat_bgs"], cur["cat_map"])
+        return ok and (len(tags) < 3 or tags[2] == cur["ang"])
     rows = []
     for tags, files in groups.items():
-        date, message = commit_info(tags[-1])
+        date, message = commit_info(tags[1] if len(tags) > 1 else tags[0])
         rows.append(dict(tags=tags, date=date, message=message, files=sorted(files), current=is_current(tags)))
     return sorted(rows, key=lambda r: r["date"], reverse=True)
 
 def _describe_files(files):
     dd = sum("_DD_" in f for f in files); dr = sum("_DR_" in f for f in files)
     if dd or dr: return "{} DD + {} DR".format(dd, dr)
+    if all(f.endswith(".npz") for f in files): return "angular weights"
     ran = sum("_ran" in f for f in files)
     return "data + {} randoms".format(ran) if len(files) > ran else "{} randoms only".format(ran)
 
@@ -239,9 +271,9 @@ def format_available(prefix):
     lines = []
     for r in rows:
         tagstr = " ".join(r["tags"])
-        lines.append("  {:<16} {:<16}  {:<40.40} {:<16}{}".format(
+        lines.append("  {:<24} {:<16}  {:<40.40} {:<16}{}".format(
             tagstr, r["date"], r["message"], _describe_files(r["files"]), "  <- current" if r["current"] else ""))
-    header = "  {:<16} {:<16}  {:<40} {:<16}".format("hash(es)", "committed", "commit message", "files")
+    header = "  {:<24} {:<16}  {:<40} {:<16}".format("hash(es)", "committed", "commit message", "files")
     return "\n".join([header] + lines)
 
 if __name__ == "__main__":
@@ -250,5 +282,5 @@ if __name__ == "__main__":
     elif len(sys.argv) == 2 and sys.argv[1] == "current":
         for k, v in current_tags().items(): print("{:<8} {}".format(k, v))
     else:
-        print("usage: python provenance.py list <bgs_fsf | corrfunc/<label>>\n"
+        print("usage: python provenance.py list <bgs_fsf | wang | corrfunc/<label>>\n"
               "       python provenance.py current")

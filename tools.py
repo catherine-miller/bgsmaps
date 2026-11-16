@@ -157,7 +157,8 @@ PIP_WEIGHT_ATTRS = {'normalization': 'counter', 'nrealizations': 129}
 def getJackknifeCounts(reftab, sampletab, refmasks_jack, samplemasks_jack, stringname, samplemask = None,
                        edges = [np.linspace(1,15,num=100),[-40,40]],position_type = 'rdd',los='midpoint',
                        useD1weights=False,useD2weights=False,mode='rppi',include_RSD = False,
-                       outpath=None,nthreads=None,weightfunc1=getWeights,weightfunc2=getWeights,weight_attrs=None):
+                       outpath=None,nthreads=None,weightfunc1=getWeights,weightfunc2=getWeights,weight_attrs=None,
+                       twopoint_weights=None):
     '''
     mode: pycorr counting mode. 'rppi' (edges = [rp edges, pi edges]) for wp, or 's' (edges = s edges only) for the monopole.
     outpath: where to save the counter. Defaults to corrfunc/BGSxquantile_<stringname>.npy (old naming).
@@ -166,6 +167,7 @@ def getJackknifeCounts(reftab, sampletab, refmasks_jack, samplemasks_jack, strin
         Default getWeights (the WEIGHT column). For PIP: getPIPWeights for data, getUnitWeights for randoms,
         and weight_attrs=PIP_WEIGHT_ATTRS.
     weight_attrs: passed to pycorr (e.g. nrealizations for bitwise weights)
+    twopoint_weights: pair weights as a function of separation, e.g. angular upweights (theta_deg, w)
     '''
     refpos = getpos(reftab,position_type=position_type,include_RSD = include_RSD)
     if samplemask is not None:
@@ -188,6 +190,7 @@ def getJackknifeCounts(reftab, sampletab, refmasks_jack, samplemasks_jack, strin
     else: D1weights = None   
     threadkw = {} if nthreads is None else {'nthreads': nthreads}
     if weight_attrs is not None: threadkw['weight_attrs'] = weight_attrs
+    if twopoint_weights is not None: threadkw['twopoint_weights'] = twopoint_weights
     counter = JackknifeTwoPointCounter(mode, edges, positions1=refpos, samples1=samples1,
                                      positions2=samplepos, samples2=samples2,
                                      position_type = position_type,los=los,weights1=D1weights,weights2=D2weights,
@@ -200,7 +203,7 @@ def getJackknifeCounts(reftab, sampletab, refmasks_jack, samplemasks_jack, strin
 def subsampleCounts(D1tab, D2tab, D1masks_jack, D2masks_jack, D2masks_samples, stringnames, 
                     edges = [np.linspace(1,15,num=100),[-40,40]],position_type = 'rdd',los='midpoint',useD1weights = False, useD2weights = False,
                     mode='rppi',include_RSD = False,outpaths=None,nthreads=None,
-                    weightfunc1=getWeights,weightfunc2=getWeights,weight_attrs=None):
+                    weightfunc1=getWeights,weightfunc2=getWeights,weight_attrs=None,twopoint_weights=None):
     '''
     outpaths: optional list of save paths, one per sample (overrides the stringnames-based naming)
     '''
@@ -212,7 +215,8 @@ def subsampleCounts(D1tab, D2tab, D1masks_jack, D2masks_jack, D2masks_samples, s
         D2count = getJackknifeCounts(D1tab,D2tab,D1masks_jack,D2masks_jack,stringname,samplemask = D2mask,
                                      edges = edges,position_type = position_type,los=los, useD1weights = useD1weights, useD2weights = useD2weights,
                                      mode = mode,include_RSD = include_RSD,outpath = outpath,nthreads = nthreads,
-                                     weightfunc1 = weightfunc1,weightfunc2 = weightfunc2,weight_attrs = weight_attrs)
+                                     weightfunc1 = weightfunc1,weightfunc2 = weightfunc2,weight_attrs = weight_attrs,
+                                     twopoint_weights = twopoint_weights)
         D2counts.append(D2count)
     return D2counts
 
@@ -273,11 +277,11 @@ def checkMatchingTags(paths):
     parsed = [provenance.parse_counts_path(p) for p in paths]
     bad = [p for p, t in zip(paths, parsed) if t is None]
     if bad: raise ValueError("not pipeline counts files (no cat-/cnt- tags): {}".format(bad))
-    for key in ['cat', 'cnt']:
+    for key in ['cat', 'cnt', 'ang']:
         values = {t[key] for t in parsed}
         if len(values) > 1:
             raise ValueError("counts files have different {}- tags {}; they come from different versions:\n  {}".format(
-                key, sorted(values), "\n  ".join(os.path.basename(p) for p in paths)))
+                key, sorted(values, key=str), "\n  ".join(os.path.basename(p) for p in paths)))
 
 def DavisPeebles2PCFJackknifeCoadd(D1D2names,D1R1name,dividebyh = False,statistic = 'wp',paths = False):
     '''

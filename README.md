@@ -10,8 +10,9 @@ Every catalog, pair count and plot is tagged with the git commit of the code tha
 bgs_catalog.py            ──>  bgs_fsf_<B>.fits, bgs_fsf_<B>_ran<i>.fits      (on pscratch)
                                      │
 map_tools.py  (MAP selection, run in memory by run_counts.py; hash <M>)
+angular_weights.py        ──>  wang_<A>.npz   (angular upweights w(θ), for weighting="pip_ang")
                                      ▼
-run_counts.py + tools.py  ──>  corrfunc/<label>_DD_cat-<B|M>_cnt-<C>[_q<i>].npy
+run_counts.py + tools.py  ──>  corrfunc/<label>_DD_cat-<B|M>_cnt-<C>[_ang-<A>][_q<i>].npy
                                corrfunc/<label>_DR_cat-<B|M>_cnt-<C>.npy
                                      ▼
 plotting notebook         ──>  figs/<name>_cat-<B|M>_cnt-<C>_plot-<P>.png
@@ -23,6 +24,7 @@ Each hash is the short hash of the **last commit that touched that stage's files
 |-----|-------|-------|
 | `B` | BGS catalog | `bgs_catalog.py` |
 | `M` | MAP catalog | `map_tools.py` |
+| `A` | angular upweights | `angular_weights.py` |
 | `C` | pair counts | `run_counts.py`, `tools.py` |
 | `P` | plot | `tools.py`, `provenance.py`, the notebook |
 
@@ -40,6 +42,9 @@ source /global/common/software/desi/users/adematti/cosmodesi_environment.sh main
 # 1. BGS catalog + n(z)-matched randoms
 srun -N 1 -C cpu -t 01:00:00 --qos interactive --account desi python bgs_catalog.py
 
+# 1b. angular upweights from the full target catalog (only needed for *_pipang measurements)
+srun -N 1 -C cpu -t 01:00:00 --qos interactive --account desi python angular_weights.py --nthreads 128
+
 # 2. pair counts for one measurement
 python run_counts.py --list
 srun -N 1 -C cpu -t 04:00:00 --qos interactive --account desi python run_counts.py bgs_smlim_s --nthreads 128
@@ -52,6 +57,7 @@ Catalogs go to `$BGSMAPS_CATALOG_DIR`, which defaults to `/pscratch/sd/c/crmille
 ```bash
 python provenance.py current                      # hashes the current code gives each stage
 python provenance.py list bgs_fsf                 # BGS catalog versions on disk
+python provenance.py list wang                    # angular-weight versions on disk
 python provenance.py list corrfunc/bgs_smlim_s    # count versions for one measurement
 ```
 ```
@@ -59,7 +65,7 @@ python provenance.py list corrfunc/bgs_smlim_s    # count versions for one measu
   4f4459c          2026-11-16 08:23  tighten z range to 0.2-0.25              data + 1 randoms  <- current
   28576c7          2026-11-09 11:51  logMstar > 10.7 cut                      data + 1 randoms
 ```
-Write commit messages that describe the change (e.g. "z range 0.2-0.25"), because this listing is how you'll tell versions apart. To count on an older catalog, run `run_counts.py <label> --bgs-hash <hash>`.
+Write commit messages that describe the change (e.g. "z range 0.2-0.25"), because this listing is how you'll tell versions apart. To count on an older catalog, run `run_counts.py <label> --bgs-hash <hash>`; for older angular weights, add `--ang-hash <hash>`.
 
 ### Plotting in a notebook
 ```python

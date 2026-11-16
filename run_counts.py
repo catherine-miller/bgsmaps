@@ -38,7 +38,9 @@ BGS_DEFAULTS = dict(
     split=None,           # e.g. ("LOGMSTAR", 4): DD for each of 4 equal-size quantiles of the data
     weighting="default",  # "default": WEIGHT column on data (randoms unweighted)
                           # "pip": PIP pair weights from BITWEIGHTS x WEIGHT_SYS*WEIGHT_ZFAIL, randoms weight 1,
-                          #        FRAC_TLOBS_TILES != 0 mask (DESI 'default_bitwise'; no angular upweighting yet)
+                          #        FRAC_TLOBS_TILES != 0 mask (DESI 'default_bitwise')
+                          # "pip_ang": "pip" plus angular upweights w(theta) on DD pairs, from angular_weights.py
+                          #        (counts are tagged _ang-<hash>; --ang-hash picks an older version)
                           # "none": no weights
 )
 
@@ -61,22 +63,32 @@ MEASUREMENTS = {
     "bgs_smlim_wp_pip":      dict(BGS_DEFAULTS, mode="rppi", edges=RPPI_EDGES, weighting="pip"),
     "bgs_smlim_wp_noweight": dict(BGS_DEFAULTS, mode="rppi", edges=RPPI_EDGES, weighting="none"),
     "bgs_smlim_s_pip":       dict(BGS_DEFAULTS, mode="s", edges=S_EDGES, weighting="pip"),
+    "bgs_smlim_wp_pipang":   dict(BGS_DEFAULTS, mode="rppi", edges=RPPI_EDGES, weighting="pip_ang"),
+    "bgs_smlim_s_pipang":    dict(BGS_DEFAULTS, mode="s", edges=S_EDGES, weighting="pip_ang"),
     "maps_s":       dict(MAP_DEFAULTS, mode="s", edges=S_EDGES),
     "maps_wp":      dict(MAP_DEFAULTS, mode="rppi", edges=RPPI_EDGES),
 }
 
 # ---- weights -------------------------------------------------------------------------------
 
-def bgsWeightSpecs(weighting):
+def bgsWeightSpecs(weighting, ang_hash=None):
     '''keyword arguments for tools.getJackknifeCounts for the DD and DR counts'''
     if weighting == "default":
         return dict(DD=dict(useD1weights=True, useD2weights=True), DR=dict(useD1weights=True, useD2weights=False))
     if weighting == "none":
         return dict(DD=dict(useD1weights=False, useD2weights=False), DR=dict(useD1weights=False, useD2weights=False))
-    if weighting == "pip":
+    if weighting in ("pip", "pip_ang"):
         pip = dict(weightfunc1=tools.getPIPWeights, weight_attrs=tools.PIP_WEIGHT_ATTRS)
-        return dict(DD=dict(useD1weights=True, useD2weights=True, weightfunc2=tools.getPIPWeights, **pip),
-                    DR=dict(useD1weights=True, useD2weights=True, weightfunc2=tools.getUnitWeights, **pip))
+        specs = dict(DD=dict(useD1weights=True, useD2weights=True, weightfunc2=tools.getPIPWeights, **pip),
+                     DR=dict(useD1weights=True, useD2weights=True, weightfunc2=tools.getUnitWeights, **pip))
+        if weighting == "pip_ang":
+            path = prov.wang_path(ang_hash)
+            if not os.path.exists(path):
+                sys.exit("missing angular weights {}; run angular_weights.py first. Available:\n{}".format(
+                    path, prov.format_available("wang")))
+            specs["DD"]["twopoint_weights"] = prov.load_wang(ang_hash)
+            print("angular upweights from", path)
+        return specs
     raise ValueError("unknown weighting '{}'".format(weighting))
 
 def applyPIPMask(data, rantab):
@@ -97,7 +109,7 @@ def applyPIPMask(data, rantab):
 
 # ---- catalogs ------------------------------------------------------------------------------
 
-def loadBGS(m, bgs_hash):
+def loadBGS(m, bgs_hash, ang_hash=None):
     datapath = prov.catalog_path(bgs_hash)
     ranpaths = [prov.catalog_path(bgs_hash, ran=i) for i in range(m["nran"])]
     missing = [p for p in [datapath] + ranpaths if not os.path.exists(p)]
@@ -108,10 +120,10 @@ def loadBGS(m, bgs_hash):
     rantab = vstack([Table.read(p) for p in ranpaths])[::m["ran_subsample"]]
     if data.meta.get('GITHASH') != bgs_hash:
         sys.exit("{} has GITHASH={} in its header, expected {}".format(datapath, data.meta.get('GITHASH'), bgs_hash))
-    if m["weighting"] == "pip": data, rantab = applyPIPMask(data, rantab)
+    if m["weighting"] in ("pip", "pip_ang"): data, rantab = applyPIPMask(data, rantab)
     jack_data, jack_ran = tools.quiltMasksFromReference(data, [data, rantab], *m["quilt"])
     countkw = dict(position_type='rdd', los='midpoint', include_RSD=False)
-    return data, rantab, jack_data, jack_ran, countkw, bgsWeightSpecs(m["weighting"])
+    return data, rantab, jack_data, jack_ran, countkw, bgsWeightSpecs(m["weighting"], ang_hash)
 
 def loadMaps(m):
     import map_tools
@@ -131,6 +143,7 @@ def main():
     parser.add_argument("label", nargs="?", help="measurement label (see --list)")
     parser.add_argument("--list", action="store_true", help="list measurement labels")
     parser.add_argument("--bgs-hash", help="use this BGS catalog version instead of the one matching bgs_catalog.py")
+    parser.add_argument("--ang-hash", help="use this angular-weights version instead of the one matching angular_weights.py")
     parser.add_argument("--nthreads", type=int, default=None, help="pycorr threads")
     parser.add_argument("--force", action="store_true", help="recompute even if the output files exist")
     args = parser.parse_args()
@@ -151,19 +164,25 @@ def main():
             print("WARNING: bgs_catalog.py has uncommitted changes; using the catalog from its last commit ({})".format(cat))
     else:
         cat = prov.stage_hash("cat_map")
-    print("measurement {}: catalog cat-{}, counting code cnt-{}".format(args.label, cat, cnt))
+    ang = None
+    if m.get("weighting") == "pip_ang":
+        ang = args.ang_hash or prov.stage_hash("ang")
+        if not args.ang_hash and prov.dirty_files(prov.STAGE_FILES["ang"]):
+            print("WARNING: angular_weights.py has uncommitted changes; using the weights from its last commit ({})".format(ang))
+    print("measurement {}: catalog cat-{}, counting code cnt-{}{}".format(args.label, cat, cnt,
+                                                                        "" if ang is None else ", angular weights ang-" + ang))
 
     split = m["split"]
     nq = split[1] if split else None
-    ddpaths = [prov.counts_path(args.label, "DD", cat, cnt, quantile=q) for q in (range(nq) if split else [None])]
-    drpath = prov.counts_path(args.label, "DR", cat, cnt)
+    ddpaths = [prov.counts_path(args.label, "DD", cat, cnt, quantile=q, ang=ang) for q in (range(nq) if split else [None])]
+    drpath = prov.counts_path(args.label, "DR", cat, cnt, ang=ang)
     if not args.force and all(os.path.exists(p) for p in ddpaths + [drpath]):
         print("counts already exist for this version (use --force to recompute):\n  " + "\n  ".join(ddpaths + [drpath]))
         return
     os.makedirs(prov.CORRFUNC_DIR, exist_ok=True)
 
     if m["sample"] == "bgs":
-        data, rantab, jack_data, jack_ran, countkw, weights = loadBGS(m, cat)
+        data, rantab, jack_data, jack_ran, countkw, weights = loadBGS(m, cat, ang)
     else:
         data, rantab, jack_data, jack_ran, countkw, weights = loadMaps(m)
     print("{} data, {} randoms, {} jackknife regions".format(len(data), len(rantab), len(jack_data)))
