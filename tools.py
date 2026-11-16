@@ -117,11 +117,12 @@ def boxMasks(tables,limits,ndivs = [3,3,3]):
     return [makeMasks(table) for table in tables]
 
     
-def getpos(tab,position_type = 'rdd',mask = None):
+def getpos(tab,position_type = 'rdd',mask = None,include_RSD = False):
     if position_type == 'rdd':
         dims = ['RA','DEC','dist']
     if position_type == 'xyz':
-        dims = ['x','y','z']
+        if include_RSD: dims = ['x','y','rsdz']
+        else: dims = ['x','y','z']
     if mask is None:
         pos = [np.array(tab[dims[0]]),np.array(tab[dims[1]]),np.array(tab[dims[2]])]
     else:
@@ -137,17 +138,17 @@ def getWeights(tab):
 
 def getJackknifeCounts(reftab, sampletab, refmasks_jack, samplemasks_jack, stringname, samplemask = None,
                        edges = [np.linspace(1,15,num=100),[-40,40]],position_type = 'rdd',los='midpoint',
-                       useD1weights=False,useD2weights=False,mode='rppi'):
+                       useD1weights=False,useD2weights=False,mode='rppi',include_RSD = False):
     '''
     mode: pycorr counting mode. 'rppi' (edges = [rp edges, pi edges]) for wp, or 's' (edges = s edges only) for the monopole.
     '''
-    refpos = getpos(reftab,position_type=position_type)
+    refpos = getpos(reftab,position_type=position_type,include_RSD = include_RSD)
     if samplemask is not None:
-        samplepos = getpos(sampletab[samplemask],position_type = position_type)
+        samplepos = getpos(sampletab[samplemask],position_type = position_type,include_RSD = include_RSD)
         if useD2weights: D2weights = getWeights(sampletab[samplemask])
         else: D2weights = None
     else:
-        samplepos = getpos(sampletab,position_type = position_type)
+        samplepos = getpos(sampletab,position_type = position_type,include_RSD = include_RSD)
         if useD2weights: D2weights = getWeights(sampletab)
         else: D2weights = None
     D2counts = len(samplepos[0])
@@ -169,14 +170,14 @@ def getJackknifeCounts(reftab, sampletab, refmasks_jack, samplemasks_jack, strin
 
 def subsampleCounts(D1tab, D2tab, D1masks_jack, D2masks_jack, D2masks_samples, stringnames, 
                     edges = [np.linspace(1,15,num=100),[-40,40]],position_type = 'rdd',los='midpoint',useD1weights = False, useD2weights = False,
-                    mode='rppi'):
+                    mode='rppi',include_RSD = False):
     D2counts = []
     for i in range(len(D2masks_samples)):
         D2mask = D2masks_samples[i]
         stringname = stringnames[i]
         D2count = getJackknifeCounts(D1tab,D2tab,D1masks_jack,D2masks_jack,stringname,samplemask = D2mask,
                                      edges = edges,position_type = position_type,los=los, useD1weights = useD1weights, useD2weights = useD2weights,
-                                     mode = mode)
+                                     mode = mode,include_RSD = include_RSD)
         D2counts.append(D2count)
     return D2counts
 
