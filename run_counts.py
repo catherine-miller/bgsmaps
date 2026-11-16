@@ -12,6 +12,11 @@ Measurements are defined in MEASUREMENTS below. To change one (or add one): edit
 Usage (NERSC, cosmodesi environment):
     srun -N 1 -C cpu -t 04:00:00 --qos interactive --account desi python run_counts.py bgs_smlim_s
     python run_counts.py --list          # list measurement labels
+
+    or for MAPs
+    mydesienv (NOT cosmodesi)
+    srun -N 1 -C cpu -t 04:00:00 --qos interactive --account desi python run_counts.py maps_s
+    python run_counts.py --list          # list measurement labels
 '''
 import os
 import sys
