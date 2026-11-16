@@ -14,6 +14,7 @@ See which versions exist on disk:
     python provenance.py list corrfunc/bgs_smlim_s
 '''
 import os
+import json
 import re
 import sys
 import glob
@@ -53,8 +54,30 @@ def file_hash(paths):
         raise RuntimeError("no commit touches {} -- commit these files first".format(paths))
     return full[:HASHLEN]
 
+def _notebook_code(text):
+    '''Sources of a notebook's code cells. Outputs, execution counts, markdown and metadata are ignored.'''
+    cells = json.loads(text).get("cells", [])
+    return [c["source"] if isinstance(c["source"], str) else "".join(c["source"])
+            for c in cells if c.get("cell_type") == "code"]
+
+def _notebook_code_changed(relpath):
+    '''True if the code cells of a notebook differ from the last commit (running cells / autosave don't count).'''
+    try:
+        committed = _git("show", "HEAD:" + relpath)
+    except RuntimeError:
+        return True
+    with open(os.path.join(REPO_ROOT, relpath)) as f:
+        current = f.read()
+    try:
+        return _notebook_code(current) != _notebook_code(committed)
+    except (ValueError, KeyError):
+        return True
+
 def dirty_files(paths):
-    '''Files among paths that are untracked or have staged/unstaged changes.'''
+    '''
+    Files among paths that are untracked or have staged/unstaged changes.
+    For notebooks (.ipynb), only changes to code cells count, so running cells and autosaving outputs is fine.
+    '''
     abspaths = _abspaths(paths)
     dirty = []
     for p in abspaths:
@@ -65,7 +88,11 @@ def dirty_files(paths):
         if not tracked:
             dirty.append(os.path.relpath(p, REPO_ROOT) + " (untracked)")
     status = _git("status", "--porcelain", "--", *abspaths)
-    dirty += [line[3:] for line in status.splitlines() if not line.startswith("??")]
+    for line in status.splitlines():
+        if line.startswith("??"): continue
+        relpath = line[3:].strip().strip('"')
+        if relpath.endswith(".ipynb") and not _notebook_code_changed(relpath): continue
+        dirty.append(relpath + (" (code cells changed)" if relpath.endswith(".ipynb") else ""))
     return dirty
 
 def require_clean(paths):
