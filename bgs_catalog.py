@@ -23,6 +23,10 @@ import provenance as prov
 LSS_DIR = "/dvs_ro/cfs/cdirs/desi/survey/catalogs/Y3/LSS/loa-v1/LSScats/v2/nonKP/"
 LSS_TRACER = "BGS_BRIGHT"
 LSS_COLUMNS = ["TARGETID", "WEIGHT", "BITWEIGHTS", "RA", "DEC", "Z"]
+# extra columns for PIP weights (DESI 'default_bitwise': WEIGHT_SYS*WEIGHT_ZFAIL with BITWEIGHTS, mask
+# FRAC_TLOBS_TILES != 0). Read when present in the LSS files; a warning is printed for any that are missing.
+LSS_PIP_COLUMNS = ["WEIGHT_SYS", "WEIGHT_ZFAIL", "WEIGHT_COMP", "FRAC_TLOBS_TILES"]
+RAN_PIP_COLUMNS = ["FRAC_TLOBS_TILES"]
 FSF_DIR = "/dvs_ro/cfs/cdirs/desi/vac/dr2/fastspecfit/loa/v1.0/catalogs/"
 FSF_FILES = [FSF_DIR + "fastspec-loa-main-bright-nside1-hp{:02}.fits".format(i) for i in range(12)]
 
@@ -42,9 +46,17 @@ def comovingDistance(z):
     '''comoving distance in Mpc/h (Planck18)'''
     return np.asarray(cosmo.comoving_distance(z)/u.Mpc*cosmo.h)
 
+def readWithOptional(path, columns, optional):
+    '''read columns plus whichever of optional exist in the file (ext 1); warn about missing optional columns'''
+    with fitsio.FITS(path) as f:
+        present = set(f[1].get_colnames())
+    missing = [c for c in optional if c not in present]
+    if missing: print("WARNING: {} has no columns {}".format(os.path.basename(path), missing))
+    return Table(fitsio.read(path, columns=columns + [c for c in optional if c in present]))
+
 def readLSS():
     '''LSS clustering catalog, NGC + SGC, with the loose z cut and subsampling'''
-    caps = [Table(fitsio.read(LSS_DIR + "{}_{}_clustering.dat.fits".format(LSS_TRACER, cap), columns=LSS_COLUMNS))
+    caps = [readWithOptional(LSS_DIR + "{}_{}_clustering.dat.fits".format(LSS_TRACER, cap), LSS_COLUMNS, LSS_PIP_COLUMNS)
             for cap in ["NGC", "SGC"]]
     lss = vstack(caps)
     lss = lss[(lss['Z'] > LSS_ZMIN) & (lss['Z'] < LSS_ZMAX)]
@@ -80,8 +92,8 @@ def makeRanCat(data, i):
         Random catalog i (NGC + SGC) with the LSS angular distribution and redshifts resampled from the data,
         so its n(z) matches the data.
     '''
-    rantab = vstack([Table(fitsio.read(LSS_DIR + "{}_{}_{}_clustering.ran.fits".format(LSS_TRACER, cap, i),
-                                       columns=["RA", "DEC", "Z"])) for cap in ["NGC", "SGC"]])
+    rantab = vstack([readWithOptional(LSS_DIR + "{}_{}_{}_clustering.ran.fits".format(LSS_TRACER, cap, i),
+                                      ["RA", "DEC", "Z"], RAN_PIP_COLUMNS) for cap in ["NGC", "SGC"]])
     rng = np.random.default_rng(SEED + i)
     rantab['Z'] = rng.choice(np.asarray(data['Z']), size=len(rantab), replace=True)
     rantab['dist'] = comovingDistance(rantab['Z'])

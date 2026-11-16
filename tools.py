@@ -137,23 +137,44 @@ def boolMasksToIntLabels(boolmasks):
 def getWeights(tab):
     return tab['WEIGHT']
 
+def getPIPWeights(tab):
+    '''
+    PIP weights in DESI's 'default_bitwise' convention (LSS/cosmodesi_io_tools.py): the BITWEIGHTS columns
+    (two int64 words per galaxy = 128 fiber-assignment realizations) as separate integer arrays, plus the float
+    weight WEIGHT_SYS*WEIGHT_ZFAIL (WEIGHT_COMP is dropped: PIP replaces the completeness correction).
+    Use with weight_attrs=PIP_WEIGHT_ATTRS. pycorr then weights DD pairs by 129/(1 + popcount(b1 & b2)),
+    and turns the data bitweights into IIP weights 129/(1 + popcount(b)) in data x randoms.
+    '''
+    bitweights = np.asarray(tab['BITWEIGHTS'])
+    if bitweights.ndim == 1: bitweights = bitweights[:, None]
+    return [np.ascontiguousarray(b) for b in bitweights.T] + [np.asarray(tab['WEIGHT_SYS']*tab['WEIGHT_ZFAIL'], dtype='f8')]
+
+def getUnitWeights(tab):
+    return np.ones(len(tab))
+
+PIP_WEIGHT_ATTRS = {'normalization': 'counter', 'nrealizations': 129}
+
 def getJackknifeCounts(reftab, sampletab, refmasks_jack, samplemasks_jack, stringname, samplemask = None,
                        edges = [np.linspace(1,15,num=100),[-40,40]],position_type = 'rdd',los='midpoint',
                        useD1weights=False,useD2weights=False,mode='rppi',include_RSD = False,
-                       outpath=None,nthreads=None):
+                       outpath=None,nthreads=None,weightfunc1=getWeights,weightfunc2=getWeights,weight_attrs=None):
     '''
     mode: pycorr counting mode. 'rppi' (edges = [rp edges, pi edges]) for wp, or 's' (edges = s edges only) for the monopole.
     outpath: where to save the counter. Defaults to corrfunc/BGSxquantile_<stringname>.npy (old naming).
     nthreads: number of threads for pycorr (default: pycorr's default).
+    weightfunc1, weightfunc2: functions table -> weights for D1 / D2, used when useD1weights / useD2weights.
+        Default getWeights (the WEIGHT column). For PIP: getPIPWeights for data, getUnitWeights for randoms,
+        and weight_attrs=PIP_WEIGHT_ATTRS.
+    weight_attrs: passed to pycorr (e.g. nrealizations for bitwise weights)
     '''
     refpos = getpos(reftab,position_type=position_type,include_RSD = include_RSD)
     if samplemask is not None:
         samplepos = getpos(sampletab[samplemask],position_type = position_type,include_RSD = include_RSD)
-        if useD2weights: D2weights = getWeights(sampletab[samplemask])
+        if useD2weights: D2weights = weightfunc2(sampletab[samplemask])
         else: D2weights = None
     else:
         samplepos = getpos(sampletab,position_type = position_type,include_RSD = include_RSD)
-        if useD2weights: D2weights = getWeights(sampletab)
+        if useD2weights: D2weights = weightfunc2(sampletab)
         else: D2weights = None
     D2counts = len(samplepos[0])
     #ranpos = getpos(randomtab)
@@ -163,9 +184,10 @@ def getJackknifeCounts(reftab, sampletab, refmasks_jack, samplemasks_jack, strin
     samples1 = boolMasksToIntLabels(refmasks_jack)
     samples2 = boolMasksToIntLabels(samplemasks_jack)
     #randoms_samples1 = boolMasksToIntLabels(randommasks_jack)
-    if useD1weights: D1weights = getWeights(reftab)
+    if useD1weights: D1weights = weightfunc1(reftab)
     else: D1weights = None   
     threadkw = {} if nthreads is None else {'nthreads': nthreads}
+    if weight_attrs is not None: threadkw['weight_attrs'] = weight_attrs
     counter = JackknifeTwoPointCounter(mode, edges, positions1=refpos, samples1=samples1,
                                      positions2=samplepos, samples2=samples2,
                                      position_type = position_type,los=los,weights1=D1weights,weights2=D2weights,
@@ -177,7 +199,8 @@ def getJackknifeCounts(reftab, sampletab, refmasks_jack, samplemasks_jack, strin
 
 def subsampleCounts(D1tab, D2tab, D1masks_jack, D2masks_jack, D2masks_samples, stringnames, 
                     edges = [np.linspace(1,15,num=100),[-40,40]],position_type = 'rdd',los='midpoint',useD1weights = False, useD2weights = False,
-                    mode='rppi',include_RSD = False,outpaths=None,nthreads=None):
+                    mode='rppi',include_RSD = False,outpaths=None,nthreads=None,
+                    weightfunc1=getWeights,weightfunc2=getWeights,weight_attrs=None):
     '''
     outpaths: optional list of save paths, one per sample (overrides the stringnames-based naming)
     '''
@@ -188,7 +211,8 @@ def subsampleCounts(D1tab, D2tab, D1masks_jack, D2masks_jack, D2masks_samples, s
         outpath = outpaths[i] if outpaths is not None else None
         D2count = getJackknifeCounts(D1tab,D2tab,D1masks_jack,D2masks_jack,stringname,samplemask = D2mask,
                                      edges = edges,position_type = position_type,los=los, useD1weights = useD1weights, useD2weights = useD2weights,
-                                     mode = mode,include_RSD = include_RSD,outpath = outpath,nthreads = nthreads)
+                                     mode = mode,include_RSD = include_RSD,outpath = outpath,nthreads = nthreads,
+                                     weightfunc1 = weightfunc1,weightfunc2 = weightfunc2,weight_attrs = weight_attrs)
         D2counts.append(D2count)
     return D2counts
 

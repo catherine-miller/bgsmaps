@@ -36,6 +36,10 @@ BGS_DEFAULTS = dict(
     ran_subsample=4,      # keep every ran_subsample-th random
     quilt=(7, 7),         # jackknife regions: RA divisions x DEC divisions
     split=None,           # e.g. ("LOGMSTAR", 4): DD for each of 4 equal-size quantiles of the data
+    weighting="default",  # "default": WEIGHT column on data (randoms unweighted)
+                          # "pip": PIP pair weights from BITWEIGHTS x WEIGHT_SYS*WEIGHT_ZFAIL, randoms weight 1,
+                          #        FRAC_TLOBS_TILES != 0 mask (DESI 'default_bitwise'; no angular upweighting yet)
+                          # "none": no weights
 )
 
 MAP_DEFAULTS = dict(
@@ -54,9 +58,42 @@ MAP_DEFAULTS = dict(
 MEASUREMENTS = {
     "bgs_smlim_s":  dict(BGS_DEFAULTS, mode="s", edges=S_EDGES),
     "bgs_smlim_wp": dict(BGS_DEFAULTS, mode="rppi", edges=RPPI_EDGES),
+    "bgs_smlim_wp_pip":      dict(BGS_DEFAULTS, mode="rppi", edges=RPPI_EDGES, weighting="pip"),
+    "bgs_smlim_wp_noweight": dict(BGS_DEFAULTS, mode="rppi", edges=RPPI_EDGES, weighting="none"),
+    "bgs_smlim_s_pip":       dict(BGS_DEFAULTS, mode="s", edges=S_EDGES, weighting="pip"),
     "maps_s":       dict(MAP_DEFAULTS, mode="s", edges=S_EDGES),
     "maps_wp":      dict(MAP_DEFAULTS, mode="rppi", edges=RPPI_EDGES),
 }
+
+# ---- weights -------------------------------------------------------------------------------
+
+def bgsWeightSpecs(weighting):
+    '''keyword arguments for tools.getJackknifeCounts for the DD and DR counts'''
+    if weighting == "default":
+        return dict(DD=dict(useD1weights=True, useD2weights=True), DR=dict(useD1weights=True, useD2weights=False))
+    if weighting == "none":
+        return dict(DD=dict(useD1weights=False, useD2weights=False), DR=dict(useD1weights=False, useD2weights=False))
+    if weighting == "pip":
+        pip = dict(weightfunc1=tools.getPIPWeights, weight_attrs=tools.PIP_WEIGHT_ATTRS)
+        return dict(DD=dict(useD1weights=True, useD2weights=True, weightfunc2=tools.getPIPWeights, **pip),
+                    DR=dict(useD1weights=True, useD2weights=True, weightfunc2=tools.getUnitWeights, **pip))
+    raise ValueError("unknown weighting '{}'".format(weighting))
+
+def applyPIPMask(data, rantab):
+    '''check the PIP columns exist, and apply DESI's FRAC_TLOBS_TILES != 0 mask to data and randoms'''
+    missing = [c for c in ["BITWEIGHTS", "WEIGHT_SYS", "WEIGHT_ZFAIL"] if c not in data.colnames]
+    if missing:
+        sys.exit("PIP weighting needs columns {} in the BGS catalog; rebuild it with the current bgs_catalog.py".format(missing))
+    out = []
+    for name, tab in [("data", data), ("randoms", rantab)]:
+        if "FRAC_TLOBS_TILES" in tab.colnames:
+            keep = np.asarray(tab["FRAC_TLOBS_TILES"]) != 0
+            print("PIP mask FRAC_TLOBS_TILES != 0: keeping {}/{} {}".format(keep.sum(), len(tab), name))
+            tab = tab[keep]
+        else:
+            print("WARNING: no FRAC_TLOBS_TILES column in {}; not applying that mask".format(name))
+        out.append(tab)
+    return out
 
 # ---- catalogs ------------------------------------------------------------------------------
 
@@ -71,9 +108,10 @@ def loadBGS(m, bgs_hash):
     rantab = vstack([Table.read(p) for p in ranpaths])[::m["ran_subsample"]]
     if data.meta.get('GITHASH') != bgs_hash:
         sys.exit("{} has GITHASH={} in its header, expected {}".format(datapath, data.meta.get('GITHASH'), bgs_hash))
+    if m["weighting"] == "pip": data, rantab = applyPIPMask(data, rantab)
     jack_data, jack_ran = tools.quiltMasksFromReference(data, [data, rantab], *m["quilt"])
     countkw = dict(position_type='rdd', los='midpoint', include_RSD=False)
-    return data, rantab, jack_data, jack_ran, countkw, dict(DD=(True, True), DR=(True, False))
+    return data, rantab, jack_data, jack_ran, countkw, bgsWeightSpecs(m["weighting"])
 
 def loadMaps(m):
     import map_tools
@@ -83,7 +121,8 @@ def loadMaps(m):
     limits = [[-m["boxlength"]/2, m["boxlength"]/2]]*3
     jack_data, jack_ran = tools.boxMasks([maps, rantab], limits, list(m["boxdivs"]))
     countkw = dict(position_type='xyz', los='z', include_RSD=m["rsd"])
-    return maps, rantab, jack_data, jack_ran, countkw, dict(DD=(False, False), DR=(False, False))
+    noweights = dict(useD1weights=False, useD2weights=False)
+    return maps, rantab, jack_data, jack_ran, countkw, dict(DD=noweights, DR=noweights)
 
 # ---- main ----------------------------------------------------------------------------------
 
@@ -133,18 +172,16 @@ def main():
     tmp = lambda p: p[:-len(".npy")] + ".tmp.npy"
 
     print("counting DD")
-    w1, w2 = weights["DD"]
     if split:
         samplemasks = tools.makeNDivMasks(data, split[0], nq)
         tools.subsampleCounts(data, data, jack_data, jack_data, samplemasks, None, outpaths=[tmp(p) for p in ddpaths],
-                              useD1weights=w1, useD2weights=w2, **common)
+                              **weights["DD"], **common)
     else:
         tools.getJackknifeCounts(data, data, jack_data, jack_data, None, outpath=tmp(ddpaths[0]),
-                                 useD1weights=w1, useD2weights=w2, **common)
+                                 **weights["DD"], **common)
     print("counting DR")
-    w1, w2 = weights["DR"]
     tools.getJackknifeCounts(data, rantab, jack_data, jack_ran, None, outpath=tmp(drpath),
-                             useD1weights=w1, useD2weights=w2, **common)
+                             **weights["DR"], **common)
 
     for p in ddpaths + [drpath]:
         os.replace(tmp(p), p)
