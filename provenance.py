@@ -138,25 +138,41 @@ def parse_counts_path(path):
     kind, cat, cnt, q = m.groups()
     return dict(kind=kind, cat=cat, cnt=cnt, quantile=None if q is None else int(q))
 
-def count_files(label, kind="DD", cat=None, cnt=None):
+def count_files(label, kind="DD", cat=None, cnt=None, current=False, verbose=True):
     '''
-    Counts files for a measurement label, sorted by quantile.
-    cat / cnt default to the hashes of the current code. If cat is not given, it matches either the
-    current BGS or the current MAP catalog hash.
+    Counts files of one kind ('DD' or 'DR') for a measurement label, sorted by quantile.
+
+    By default, uses the most recently written version on disk: among the (cat, cnt) versions that have both
+    DD and DR files, the one whose newest file is most recent. DD and DR calls therefore pick the same version.
+    cat / cnt: restrict to versions with these hashes (e.g. to plot an older version)
+    current: restrict to the versions matching the current code (cnt = current counts hash,
+             cat = current BGS or MAP catalog hash)
     '''
-    tags = current_tags()
-    cnt = cnt or tags["cnt"]
-    cats = [cat] if cat else [tags["cat_bgs"], tags["cat_map"]]
-    files = []
-    for c in cats:
-        pattern = os.path.join(CORRFUNC_DIR, "{}_{}_cat-{}_cnt-{}*.npy".format(label, kind, c, cnt))
-        files += [f for f in glob.glob(pattern) if parse_counts_path(f) is not None]
-    if not files:
-        raise FileNotFoundError("no {} counts for '{}' with cat in {} and cnt-{}. Run: python run_counts.py {}\n"
-                                "Available:\n{}".format(kind, label, cats, cnt, label,
+    if current:
+        tags = current_tags()
+        cnt = cnt or tags["cnt"]
+        cats = [cat] if cat else [tags["cat_bgs"], tags["cat_map"]]
+    else:
+        cats = [cat] if cat else None
+
+    versions = {}
+    for f in glob.glob(os.path.join(CORRFUNC_DIR, "{}_D[DR]_cat-*.npy".format(label))):
+        t = parse_counts_path(f)
+        if t is None: continue
+        if cats is not None and t["cat"] not in cats: continue
+        if cnt is not None and t["cnt"] != cnt: continue
+        versions.setdefault((t["cat"], t["cnt"]), []).append((f, t))
+    complete = {v: fs for v, fs in versions.items() if {t["kind"] for f, t in fs} == {"DD", "DR"}}
+    if not complete:
+        raise FileNotFoundError("no complete (DD + DR) counts for '{}' with cat={} cnt={}{}. Run: python run_counts.py {}\n"
+                                "Available:\n{}".format(label, cats, cnt, " (current code)" if current else "", label,
                                                         format_available(os.path.join(CORRFUNC_DIR, label))))
-    q = lambda f: parse_counts_path(f)["quantile"] or 0
-    return sorted(set(files), key=q)
+    newest = max(complete, key=lambda v: max(os.path.getmtime(f) for f, t in complete[v]))
+    if verbose:
+        date, message = commit_info(newest[1])
+        print("{} {}: cat-{} cnt-{} ({}, {})".format(label, kind, newest[0], newest[1], date, message))
+    files = [(f, t) for f, t in complete[newest] if t["kind"] == kind]
+    return [f for f, t in sorted(files, key=lambda ft: ft[1]["quantile"] or 0)]
 
 def plot_name(base, count_files, notebook, ext="png"):
     '''

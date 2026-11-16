@@ -30,7 +30,7 @@ Each hash is the short hash of the **last commit that touched that stage's files
 - **Settings are hardcoded and committed.** The BGS cuts live in `bgs_catalog.py`. The binning, jackknife regions, randoms, MAP selection and quantile splits live in `MEASUREMENTS` in `run_counts.py`. To change something, edit the file and commit it, then rerun.
 - **Uncommitted code is refused.** Every stage stops with an error if its files have uncommitted changes, so an output never carries a hash that doesn't describe it.
 - **Outputs are never overwritten.** A new version gets new filenames. Rerunning an existing version is skipped. Pass `run_counts.py --force` to recompute anyway.
-- **Each stage finds its inputs by itself.** `run_counts.py` loads the BGS catalog matching the current `bgs_catalog.py`, and the notebook loads the counts matching the current code. To reproduce an old plot, `git checkout` the hashes in its filename.
+- **Each stage finds its inputs by itself.** `run_counts.py` loads the BGS catalog matching the current `bgs_catalog.py`, and the notebook loads the most recently written counts (`prov.count_files`), whose hashes then go into the plot filename. To reproduce an old plot, `git checkout` the hashes in its filename.
 - **Push your commits.** The hashes only help if the commits exist somewhere other than one machine.
 
 ### Running it (NERSC, cosmodesi environment)
@@ -65,7 +65,7 @@ Write commit messages that describe the change (e.g. "z range 0.2-0.25"), becaus
 ```python
 import provenance as prov, tools
 
-dd = prov.count_files("bgs_smlim_s", "DD")      # matches the current code by default
+dd = prov.count_files("bgs_smlim_s", "DD")      # most recently written version on disk
 dr = prov.count_files("bgs_smlim_s", "DR")[0]
 s, s2xi0, err = tools.DavisPeebles2PCFJackknifeCoadd(dd, dr, statistic="xi0", paths=True)
 plt.errorbar(s, s2xi0, yerr=err, label="BGS")
@@ -74,6 +74,6 @@ plt.savefig(prov.plot_name("xi0_bgs_vs_maps", dd + [dr], "bgsclustering.ipynb"))
 ```
 - `paths=True` raises an error if the DD and DR files come from different catalog or counting versions.
 - `plot_name` refuses to run if the notebook, `tools.py` or `provenance.py` have uncommitted changes.
-- To plot older counts, pass `cat=` / `cnt=` to `count_files`.
+- `count_files` uses the most recently written complete (DD + DR) version by default, and prints which one it picked. To choose a different version, pass `cat=` / `cnt=`. To require counts that match the current code, pass `current=True`.
 
-**Caveat:** the check compares the notebook *file* to git, not the cells you actually ran. For a figure you want to keep: save the notebook, commit it, restart the kernel and rerun it, then save the figure.
+**Notebooks:** the check compares only the notebook's code cells to the last commit. Outputs, execution counts and markdown are ignored, so running cells doesn't count as a change. It still checks the saved *file*, not the cells you actually ran. For a figure you want to keep: save the notebook, commit it, restart the kernel and rerun it, then save the figure.
