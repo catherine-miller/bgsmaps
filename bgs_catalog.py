@@ -27,7 +27,9 @@ FSF_DIR = "/dvs_ro/cfs/cdirs/desi/vac/dr2/fastspecfit/loa/v1.0/catalogs/"
 FSF_FILES = [FSF_DIR + "fastspec-loa-main-bright-nside1-hp{:02}.fits".format(i) for i in range(12)]
 
 LSS_ZMIN, LSS_ZMAX = 0.1, 0.4   # loose redshift cut on the LSS catalog before the join
-LSS_SUBSAMPLE = 4               # keep every LSS_SUBSAMPLE-th LSS galaxy
+LSS_KEEP_FRAC = 1.0             # random fraction of LSS galaxies to keep (1.0 = all). Seeded random subsample, NOT
+                                # a stride like [::4]: catalogs are ordered by TARGETID (~position), so a stride
+                                # preferentially breaks up close pairs and suppresses small-scale clustering
 ZMIN, ZMAX = 0.2, 0.25          # final redshift range
 LOGMSTAR_MIN = 10.7             # final stellar-mass cut
 
@@ -46,7 +48,9 @@ def readLSS():
             for cap in ["NGC", "SGC"]]
     lss = vstack(caps)
     lss = lss[(lss['Z'] > LSS_ZMIN) & (lss['Z'] < LSS_ZMAX)]
-    return lss[::LSS_SUBSAMPLE]
+    if LSS_KEEP_FRAC < 1:
+        lss = lss[np.random.default_rng(SEED).random(len(lss)) < LSS_KEEP_FRAC]
+    return lss
 
 def makeBGSTab(file, lss):
     '''
