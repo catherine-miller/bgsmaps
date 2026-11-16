@@ -171,7 +171,7 @@ def getJackknifeCounts(reftab, sampletab, refmasks_jack, samplemasks_jack, strin
                                      position_type = position_type,los=los,weights1=D1weights,weights2=D2weights,
                                      **threadkw)
 
-    if outpath is None: outpath = "corrfunc/BGSxquantile_"+stringname
+    if outpath is None: outpath = "corrfunc/"+stringname
     counter.save(outpath)
     return D2counts
 
