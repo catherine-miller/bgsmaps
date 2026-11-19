@@ -70,8 +70,8 @@ MEASUREMENTS = {
     "maps_s":       dict(MAP_DEFAULTS, mode="s", edges=S_EDGES),
     "maps_wp":      dict(MAP_DEFAULTS, mode="rppi", edges=RPPI_EDGES),
     "maps_s_lm":    dict(MAP_DEFAULTS, mode="s", edges=S_EDGES, split=("largest_merger", 4)),
-    "maps_wp_lm":      dict(MAP_DEFAULTS, mode="wp", edges=RPPI_EDGES, split=("largest_merger", 4)),
-    "maps_wp_pressure":      dict(MAP_DEFAULTS, mode="wp", edges=RPPI_EDGES, split=("ram_pressure", 4)),
+    "maps_wp_lm":      dict(MAP_DEFAULTS, mode="rppi", edges=RPPI_EDGES, split=("largest_merger", 4)),
+    "maps_wp_pressure":      dict(MAP_DEFAULTS, mode="rppi", edges=RPPI_EDGES, split=("ram_pressure", 4)),
 }
 
 # ---- weights -------------------------------------------------------------------------------
