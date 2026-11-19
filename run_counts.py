@@ -10,11 +10,11 @@ counts hash:  last commit touching run_counts.py or tools.py
 Measurements are defined in MEASUREMENTS below. To change one (or add one): edit, commit, rerun.
 
 Usage (NERSC, cosmodesi environment):
-    srun -N 1 -C cpu -t 04:00:00 --qos interactive --account desi python run_counts.py bgs_smlim_s
+    srun -N 1 -C cpu -t 04:00:00 --qos interactive --account desi python run_counts.py bgs_smlim_wp_pipang
     python run_counts.py --list          # list measurement labels
 
     or for MAPs (the catalog comes from map_catalog.py)
-    srun -N 1 -C cpu -t 04:00:00 --qos interactive --account desi python run_counts.py maps_s
+    srun -N 1 -C cpu -t 04:00:00 --qos interactive --account desi python run_counts.py maps_wp
 '''
 import os
 import sys
@@ -33,7 +33,7 @@ BGS_DEFAULTS = dict(
     nran=1,               # number of bgs_fsf_<hash>_ran<i>.fits files to use
     ran_subsample=4,      # keep every ran_subsample-th random
     quilt=(7, 7),         # jackknife regions: RA divisions x DEC divisions
-    split=None,           # e.g. ("LOGMSTAR", 4): DD for each of 4 equal-size quantiles of the data
+    split=("LOGMSTAR", 4),           # e.g. ("LOGMSTAR", 4): DD for each of 4 equal-size quantiles of the data
     weighting="default",  # "default": WEIGHT column on data (randoms unweighted)
                           # "pip": PIP pair weights from BITWEIGHTS x WEIGHT_SYS*WEIGHT_ZFAIL, randoms weight 1,
                           #        FRAC_TLOBS_TILES != 0 mask (DESI 'default_bitwise')
@@ -47,7 +47,7 @@ MAP_DEFAULTS = dict(
     catalog="maps",       # which map_catalog.py catalog (CATALOGS there): maps_<hash>.fits + its RANFILE randoms
     rsd=True,             # redshift-space positions along z
     boxdivs=(3, 3, 3),    # jackknife regions
-    split=None,           # e.g. ("mult", 4), or any secondary column such as ("largest_merger", 4)
+    split=("mult", 4),           # e.g. ("mult", 4), or any secondary column such as ("largest_merger", 4)
 )
 
 MEASUREMENTS = {
