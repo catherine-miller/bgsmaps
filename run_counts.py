@@ -12,6 +12,12 @@ Measurements are defined in MEASUREMENTS below. To change one (or add one): edit
 Usage (NERSC, cosmodesi environment):
     srun -N 1 -C cpu -t 04:00:00 --qos interactive --account desi python run_counts.py bgs_smlim_s
     python run_counts.py --list          # list measurement labels
+    python run_counts.py maps_s_lm --dry-run   # load the catalog and show the split, without counting
+
+Splits: split=(expr, n) makes n equal-size quantiles of expr, split=(expr, [edges]) makes fixed bins. expr is
+any expression over the catalog's columns and the named DERIVED columns in columns.py, e.g.
+("largest_merger", 4), ("lm_mult", 4), ("log10(mult)", [2, 2.5, 3, 5]). Try one with --dry-run (no commit
+needed), then commit and run.
 
     or for MAPs (the catalog comes from map_catalog.py)
     srun -N 1 -C cpu -t 04:00:00 --qos interactive --account desi python run_counts.py maps_s
@@ -24,6 +30,7 @@ from astropy.table import Table, vstack
 
 import provenance as prov
 import tools
+import columns
 
 S_EDGES = np.logspace(np.log10(0.05), np.log10(50), num=20)
 RPPI_EDGES = [np.logspace(np.log10(0.05), np.log10(5), num=20), [-40, 40]]
@@ -33,7 +40,8 @@ BGS_DEFAULTS = dict(
     nran=1,               # number of bgs_fsf_<hash>_ran<i>.fits files to use
     ran_subsample=4,      # keep every ran_subsample-th random
     quilt=(7, 7),         # jackknife regions: RA divisions x DEC divisions
-    split=None,           # e.g. ("LOGMSTAR", 4): DD for each of 4 equal-size quantiles of the data
+    split=None,           # e.g. ("LOGMSTAR", 4): DD for each of 4 equal-size quantiles of the data.
+                          # (expr, n) or (expr, [edges]); expr can use columns.py DERIVED (see top of file)
     weighting="default",  # "default": WEIGHT column on data (randoms unweighted)
                           # "pip": PIP pair weights from BITWEIGHTS x WEIGHT_SYS*WEIGHT_ZFAIL, randoms weight 1,
                           #        FRAC_TLOBS_TILES != 0 mask (DESI 'default_bitwise')
@@ -47,7 +55,8 @@ MAP_DEFAULTS = dict(
     catalog="maps",       # which map_catalog.py catalog (CATALOGS there): maps_<hash>.fits + its RANFILE randoms
     rsd=True,             # redshift-space positions along z
     boxdivs=(3, 3, 3),    # jackknife regions
-    split=None,           # e.g. ("mult", 4), or any secondary column such as ("largest_merger", 4)
+    split=None,           # (expr, n) quantiles or (expr, [edges]) bins, e.g. ("largest_merger", 4),
+                          # ("lm_mult", 4), ("log10(mult)", [2, 2.5, 3, 5]); DERIVED names are in columns.py
 )
 
 MEASUREMENTS = {
@@ -153,16 +162,24 @@ def main():
     parser.add_argument("--ang-hash", help="use this angular-weights version instead of the one matching angular_weights.py")
     parser.add_argument("--nthreads", type=int, default=None, help="pycorr threads")
     parser.add_argument("--force", action="store_true", help="recompute even if the output files exist")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="load the catalog and print the split subsamples, then stop (uncommitted edits allowed)")
     args = parser.parse_args()
 
     if args.list or args.label is None:
-        print("measurements:\n  " + "\n  ".join(MEASUREMENTS))
+        print("measurements:")
+        for label, mm in MEASUREMENTS.items():
+            print("  {:<24} {}".format(label, "" if mm["split"] is None else "split={}".format(mm["split"])))
         return
     if args.label not in MEASUREMENTS:
         sys.exit("unknown measurement '{}'. Choose from: {}".format(args.label, ", ".join(MEASUREMENTS)))
     m = MEASUREMENTS[args.label]
 
-    prov.require_clean(prov.STAGE_FILES["cnt"])
+    if args.dry_run:
+        if prov.dirty_files(prov.STAGE_FILES["cnt"]):
+            print("dry run with uncommitted changes to the counting code; commit before running for real")
+    else:
+        prov.require_clean(prov.STAGE_FILES["cnt"])
     cnt = prov.stage_hash("cnt")
     if m["sample"] == "bgs":
         cat = args.bgs_hash or prov.stage_hash("cat_bgs")
@@ -181,26 +198,28 @@ def main():
                                                                         "" if ang is None else ", angular weights ang-" + ang))
 
     split = m["split"]
-    nq = split[1] if split else None
+    nq = columns.nsplit(split)
     ddpaths = [prov.counts_path(args.label, "DD", cat, cnt, quantile=q, ang=ang) for q in (range(nq) if split else [None])]
     drpath = prov.counts_path(args.label, "DR", cat, cnt, ang=ang)
-    if not args.force and all(os.path.exists(p) for p in ddpaths + [drpath]):
+    if not args.dry_run and not args.force and all(os.path.exists(p) for p in ddpaths + [drpath]):
         print("counts already exist for this version (use --force to recompute):\n  " + "\n  ".join(ddpaths + [drpath]))
         return
-    os.makedirs(prov.CORRFUNC_DIR, exist_ok=True)
-
     if m["sample"] == "bgs":
         data, rantab, jack_data, jack_ran, countkw, weights = loadBGS(m, cat, ang)
     else:
         data, rantab, jack_data, jack_ran, countkw, weights = loadMaps(m, cat)
     print("{} data, {} randoms, {} jackknife regions".format(len(data), len(rantab), len(jack_data)))
+    samplemasks = columns.split_masks(data, split, verbose=True) if split else None
+    if args.dry_run:
+        print("dry run: not counting")
+        return
+    os.makedirs(prov.CORRFUNC_DIR, exist_ok=True)
 
     common = dict(edges=m["edges"], mode=m["mode"], nthreads=args.nthreads, **countkw)
     tmp = lambda p: p[:-len(".npy")] + ".tmp.npy"
 
     print("counting DD")
     if split:
-        samplemasks = tools.makeNDivMasks(data, split[0], nq)
         tools.subsampleCounts(data, data, jack_data, jack_data, samplemasks, None, outpaths=[tmp(p) for p in ddpaths],
                               **weights["DD"], **common)
     else:

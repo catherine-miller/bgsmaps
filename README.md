@@ -26,7 +26,7 @@ Each hash is the short hash of the **last commit that touched that stage's files
 | `B` | BGS catalog | `bgs_catalog.py` |
 | `M` | MAP catalog | `map_catalog.py`, `map_tools.py` |
 | `A` | angular upweights | `angular_weights.py` |
-| `C` | pair counts | `run_counts.py`, `tools.py` |
+| `C` | pair counts | `run_counts.py`, `tools.py`, `columns.py` |
 | `P` | plot | `tools.py`, `provenance.py`, the notebook |
 
 ### Rules
@@ -85,6 +85,23 @@ Each MAP row has `x, y, z, vel_z, rsdz, mult`, one column per secondary property
 1. Write `func(tab, indices, **kwargs)` in `map_tools.py`. It must return one value per index. `tab` is the full table of **one** maplog file, and `indices` are the rows of the selected head nodes.
 2. Add an entry to `SECONDARY` in `map_catalog.py`, e.g. `"ram_pressure": dict(func=map_tools.integratedRamPressure, load=['node_type','length','density','rel_vel'], kwargs=dict(nepochs=10))`.
 3. Commit and rerun. Any secondary column can then be used as a split in `run_counts.py`, e.g. `split=("largest_merger", 4)`.
+
+### Derived columns and splits
+Quantities that only combine catalog columns, like ratios, products and logs, don't need a new catalog. Define them in `DERIVED` in `columns.py`, or write them directly in a split. `columns.py` belongs to the counts stage (`C`), so changing it never changes the catalog hash `M`.
+
+```python
+# columns.py
+DERIVED = {
+    "log_mult": "log10(mult)",
+    "lm_mult":  "largest_merger * mult",
+}
+# run_counts.py MEASUREMENTS
+"maps_s_lmmult": dict(MAP_DEFAULTS, mode="s", edges=S_EDGES, split=("lm_mult", 4)),               # 4 quantiles
+"maps_s_mbins":  dict(MAP_DEFAULTS, mode="s", edges=S_EDGES, split=("log10(mult)", [2, 2.5, 3, 5])),  # fixed bins
+```
+An expression can use any catalog column, any `DERIVED` name, numpy functions by name (`log10`, `where`, `sqrt`, ...) and `np`. A `DERIVED` entry can also be a function `tab -> array`.
+
+Use `python run_counts.py <label> --dry-run` to try a split before committing. It loads the catalog, prints each subsample's size and value range, and stops before counting. In a notebook, `columns.evaluate(maps, "lm_mult")` gives the same values a split uses.
 
 ### Plotting in a notebook
 ```python

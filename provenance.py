@@ -37,7 +37,7 @@ HASHLEN = 7
 STAGE_FILES = {
     "cat_bgs": ["bgs_catalog.py"],
     "cat_map": ["map_catalog.py", "map_tools.py"],
-    "cnt": ["run_counts.py", "tools.py"],
+    "cnt": ["run_counts.py", "tools.py", "columns.py"],
     "ang": ["angular_weights.py"],
 }
 
