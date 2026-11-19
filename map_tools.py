@@ -1,13 +1,15 @@
 '''
-Tools for selecting Abacus MAPs (from maplogs) and making box randoms.
-Moved from mapclustering_highbase.ipynb. Still being workshopped: this is a module, not a pipeline stage.
-The hash of the last commit touching this file tags MAP-based counts (cat-<hash>).
+Library for map_catalog.py: epoch selection, merger-history / environment properties, RSD and box randoms for
+Abacus MAPs (from maplogs). Changing this file changes the MAP catalog hash (cat-<hash>), together with map_catalog.py.
+
+Secondary properties used in map_catalog.SECONDARY have the signature func(tab, indices, **kwargs) -> array of
+len(indices), where tab is the full table of one maplog file and indices are the rows of the head nodes.
 '''
 import os
 import numpy as np
 import astropy.constants as const
 import astropy.units as u
-from astropy.table import Table, vstack
+from astropy.table import Table
 from astropy.cosmology import Planck18 as cosmo
 from abacusnbody.data.read_abacus import read_asdf
 
@@ -113,15 +115,6 @@ def read_select_z(file, targetz=0.225, load=['pos','mult','node_type','timestep'
 def get_z_indices(tab, targetz=0.225):
     return np.flatnonzero(epoch_mask(tab, targetz))   # indices into the full tab
 
-def compute_history_epoch(file, targetz, functions, arguments, funcnames,
-                          load=['pos','mult','node_type','timestep'], colsout=['pos','mult']):
-    tab = read_asdf(file, load=load)
-    indices = get_z_indices(tab, targetz)
-    epochtab = tab[indices][colsout]
-    for func, args, name in zip(functions, arguments, funcnames):
-        epochtab[name] = func(tab, indices, *args)
-    return epochtab
-
 # ---- RSD -----------------------------------------------------------------------------------
 
 C_KMS = const.c.to(u.km / u.s).value  # 299792.458
@@ -141,7 +134,7 @@ def getRSDpos(pos,vel,z):
     H_h = 100.0 * cosmo.efunc(z)                        # H(z)/h in km/s/(Mpc/h)
     return pos + C_KMS * dz / H_h                       # Mpc/h
 
-# ---- catalog helpers (from the inline notebook cells) --------------------------------------
+# ---- catalog helpers -----------------------------------------------------------------------
 
 def find_maplog_files(mapdir):
     '''all .asdf files under mapdir, sorted'''
@@ -151,31 +144,6 @@ def find_maplog_files(mapdir):
             if "asdf" in file:
                 filelist.append(os.path.join(root, file))
     return sorted(filelist)
-
-def load_maps_at_z(mapdir, targetz=0.225, rsd=True):
-    '''
-    MAPs at the saved step nearest targetz from every maplog file in mapdir, with x, y, z columns (Mpc/h)
-    and, if rsd, rsdz = z displaced along the z axis by the z velocity.
-    '''
-    tab = vstack([read_select_z(f, targetz, load=['pos','mult','node_type','timestep','vel'])
-                  for f in find_maplog_files(mapdir)])
-    tab['x'] = tab['pos'][:,0]
-    tab['y'] = tab['pos'][:,1]
-    tab['z'] = tab['pos'][:,2]
-    tab['vel_z'] = tab['vel'][:,2]
-    if rsd: tab['rsdz'] = getRSDpos(tab['z'], tab['vel_z'], targetz)
-    return tab
-
-def select_density_matched(tab, boxlength, goaldensity, column='mult'):
-    '''
-    The boxlength**3 * goaldensity MAPs with the largest `column`, so the sample matches a target number density.
-    Prints the resulting minimum multiplicity.
-    '''
-    numgoal = int(boxlength**3 * goaldensity)
-    order = np.argsort(np.asarray(tab[column]), kind='stable')
-    selected = tab[order[-numgoal:]]
-    print("selected {} MAPs, minimum {} = {}".format(numgoal, column, np.min(selected[column])))
-    return selected
 
 def box_randoms(n, boxlength, seed, rsd=True):
     '''n uniform randoms in [-boxlength/2, boxlength/2]^3. If rsd, adds rsdz = z (randoms have no velocities).'''

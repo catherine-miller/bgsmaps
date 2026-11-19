@@ -6,12 +6,16 @@ that produced it. Stages refuse to run when that code has uncommitted changes, s
 identifies exactly what made a file.
 
     bgs_catalog.py            -> <CATALOG_DIR>/bgs_fsf_<B>.fits, bgs_fsf_<B>_ran<i>.fits
+    map_catalog.py + map_tools.py -> <CATALOG_DIR>/maps_<M>.fits (and other variants, e.g. maps_all_<M>.fits)
+                                     <CATALOG_DIR>/boxran_L<box>_n<n>_s<seed>.fits (box randoms, named by parameters)
     angular_weights.py        -> <CATALOG_DIR>/wang_<A>.npz
     run_counts.py + tools.py  -> corrfunc/<label>_{DD,DR}_cat-<B|M>_cnt-<C>[_ang-<A>][_q<i>].npy
     plotting notebook         -> figs/<base>_cat-<...>_cnt-<C>_plot-<P>.png
 
 See which versions exist on disk:
     python provenance.py list bgs_fsf
+    python provenance.py list maps
+    python provenance.py list boxran
     python provenance.py list wang
     python provenance.py list corrfunc/bgs_smlim_s
 '''
@@ -32,7 +36,7 @@ HASHLEN = 7
 # which source files define each stage's hash
 STAGE_FILES = {
     "cat_bgs": ["bgs_catalog.py"],
-    "cat_map": ["map_tools.py"],
+    "cat_map": ["map_catalog.py", "map_tools.py"],
     "cnt": ["run_counts.py", "tools.py"],
     "ang": ["angular_weights.py"],
 }
@@ -136,6 +140,19 @@ def catalog_path(h, ran=None, name="bgs_fsf"):
     base = "{}_{}".format(name, h) if ran is None else "{}_{}_ran{}".format(name, h, ran)
     return os.path.join(CATALOG_DIR, base + ".fits")
 
+def boxran_path(boxlength, n, seed):
+    '''box randoms for the MAP catalogs. Named by their parameters (not a hash) so every catalog version reuses them.'''
+    return os.path.join(CATALOG_DIR, "boxran_L{:.1f}_n{}_s{}.fits".format(boxlength, n, seed))
+
+def write_tagged(tab, path, githash, **extra):
+    '''write an astropy table to FITS atomically, with GITHASH (unless None) and extra header keywords'''
+    if githash is not None: tab.meta['GITHASH'] = githash
+    for k, v in extra.items(): tab.meta[k] = v
+    tmp = path + ".tmp"
+    tab.write(tmp, format='fits', overwrite=True)
+    os.replace(tmp, path)
+    print("wrote", path)
+
 def wang_path(h):
     '''angular upweights w(theta) made by angular_weights.py at commit h'''
     return os.path.join(CATALOG_DIR, "wang_{}.npz".format(h))
@@ -229,16 +246,22 @@ def available(prefix):
     CATALOG_DIR) or a path such as 'corrfunc/bgs_smlim_s'.
     Returns a list of dicts, newest commit first: {'tags', 'date', 'message', 'files', 'current'}.
     '''
+    if prefix == "boxran":
+        return _available_boxran()
     if os.sep in prefix:
         base = prefix if os.path.isabs(prefix) else os.path.join(REPO_ROOT, prefix)
         pattern = base + "_D[DR]_cat-*.npy"
+        exact = None
     else:
         base = os.path.join(CATALOG_DIR, prefix)
         pattern = base + "_*"
+        # only <prefix>_<hash>[_ran<i>].<ext>, so e.g. 'maps' doesn't pick up maps_all_<hash>.fits
+        exact = re.compile(r"^{}_[0-9a-f]{{{}}}(?:_ran\d+)?\.(?:fits|npz)$".format(re.escape(prefix), HASHLEN))
     groups = {}
     for f in glob.glob(pattern):
         name = os.path.basename(f)
         if ".tmp." in name: continue
+        if exact is not None and not exact.match(name): continue
         tags = tuple(_HASH_RE.findall(name[len(os.path.basename(base)):]))
         if tags: groups.setdefault(tags, []).append(name)
     try:
@@ -248,7 +271,8 @@ def available(prefix):
     def is_current(tags):
         if cur is None: return False
         if len(tags) == 1:                                    # catalog or angular-weights file
-            return tags[0] == (cur["ang"] if os.path.basename(base) == "wang" else cur["cat_bgs"])
+            stage = {"wang": "ang", "bgs_fsf": "cat_bgs"}.get(os.path.basename(base), "cat_map")
+            return tags[0] == cur[stage]
         cat, cnt = tags[:2]                                   # counts file (tags[2] = ang, if present)
         ok = cnt == cur["cnt"] and cat in (cur["cat_bgs"], cur["cat_map"])
         return ok and (len(tags) < 3 or tags[2] == cur["ang"])
@@ -258,11 +282,25 @@ def available(prefix):
         rows.append(dict(tags=tags, date=date, message=message, files=sorted(files), current=is_current(tags)))
     return sorted(rows, key=lambda r: r["date"], reverse=True)
 
+def _available_boxran():
+    '''box-random files (no hash): one row per file, dated by modification time'''
+    import time
+    rows = []
+    for f in glob.glob(os.path.join(CATALOG_DIR, "boxran_*.fits")):
+        name = os.path.basename(f)
+        if ".tmp." in name: continue
+        date = time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(f)))
+        rows.append(dict(tags=(name[len("boxran_"):-len(".fits")],), date=date, message="box randoms (written)",
+                         files=[name], current=False))
+    return sorted(rows, key=lambda r: r["date"], reverse=True)
+
 def _describe_files(files):
     dd = sum("_DD_" in f for f in files); dr = sum("_DR_" in f for f in files)
     if dd or dr: return "{} DD + {} DR".format(dd, dr)
     if all(f.endswith(".npz") for f in files): return "angular weights"
+    if all(f.startswith("boxran_") for f in files): return "box randoms"
     ran = sum("_ran" in f for f in files)
+    if ran == 0: return "data"
     return "data + {} randoms".format(ran) if len(files) > ran else "{} randoms only".format(ran)
 
 def format_available(prefix):
@@ -282,5 +320,5 @@ if __name__ == "__main__":
     elif len(sys.argv) == 2 and sys.argv[1] == "current":
         for k, v in current_tags().items(): print("{:<8} {}".format(k, v))
     else:
-        print("usage: python provenance.py list <bgs_fsf | wang | corrfunc/<label>>\n"
+        print("usage: python provenance.py list <bgs_fsf | maps | maps_all | boxran | wang | corrfunc/<label>>\n"
               "       python provenance.py current")

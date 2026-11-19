@@ -4,7 +4,7 @@ Compute jackknife pair counts (DD and DR) for one measurement, tagged with commi
     corrfunc/<label>_DR_cat-<catalog hash>_cnt-<counts hash>.npy
 
 catalog hash: BGS -> last commit touching bgs_catalog.py (override with --bgs-hash)
-              MAPs -> last commit touching map_tools.py
+              MAPs -> last commit touching map_catalog.py or map_tools.py (override with --map-hash)
 counts hash:  last commit touching run_counts.py or tools.py
 
 Measurements are defined in MEASUREMENTS below. To change one (or add one): edit, commit, rerun.
@@ -13,10 +13,8 @@ Usage (NERSC, cosmodesi environment):
     srun -N 1 -C cpu -t 04:00:00 --qos interactive --account desi python run_counts.py bgs_smlim_s
     python run_counts.py --list          # list measurement labels
 
-    or for MAPs
-    mydesienv (NOT cosmodesi)
+    or for MAPs (the catalog comes from map_catalog.py)
     srun -N 1 -C cpu -t 04:00:00 --qos interactive --account desi python run_counts.py maps_s
-    python run_counts.py --list          # list measurement labels
 '''
 import os
 import sys
@@ -46,15 +44,10 @@ BGS_DEFAULTS = dict(
 
 MAP_DEFAULTS = dict(
     sample="maps",
-    mapdir="/global/cfs/cdirs/cosmo/staging/AbacusAurora/AbacusAurora_rockV2_c000_ph390_n800/maplogs/",
-    targetz=0.225,
-    boxlength=2*108.5,    # Mpc/h
-    goaldensity=0.00247278,
+    catalog="maps",       # which map_catalog.py catalog (CATALOGS there): maps_<hash>.fits + its RANFILE randoms
     rsd=True,             # redshift-space positions along z
-    ran_factor=200,       # randoms per MAP
-    ran_seed=42,
     boxdivs=(3, 3, 3),    # jackknife regions
-    split=None,           # e.g. ("mult", 4)
+    split=None,           # e.g. ("mult", 4), or any secondary column such as ("largest_merger", 4)
 )
 
 MEASUREMENTS = {
@@ -67,6 +60,7 @@ MEASUREMENTS = {
     "bgs_smlim_s_pipang":    dict(BGS_DEFAULTS, mode="s", edges=S_EDGES, weighting="pip_ang"),
     "maps_s":       dict(MAP_DEFAULTS, mode="s", edges=S_EDGES),
     "maps_wp":      dict(MAP_DEFAULTS, mode="rppi", edges=RPPI_EDGES),
+    "maps_s_lm":    dict(MAP_DEFAULTS, mode="s", edges=S_EDGES, split=("largest_merger", 4)),
 }
 
 # ---- weights -------------------------------------------------------------------------------
@@ -125,12 +119,24 @@ def loadBGS(m, bgs_hash, ang_hash=None):
     countkw = dict(position_type='rdd', los='midpoint', include_RSD=False)
     return data, rantab, jack_data, jack_ran, countkw, bgsWeightSpecs(m["weighting"], ang_hash)
 
-def loadMaps(m):
-    import map_tools
-    maps = map_tools.load_maps_at_z(m["mapdir"], m["targetz"], rsd=m["rsd"])
-    maps = map_tools.select_density_matched(maps, m["boxlength"], m["goaldensity"])
-    rantab = map_tools.box_randoms(m["ran_factor"]*len(maps), m["boxlength"], m["ran_seed"], rsd=m["rsd"])
-    limits = [[-m["boxlength"]/2, m["boxlength"]/2]]*3
+def loadMaps(m, map_hash):
+    datapath = prov.catalog_path(map_hash, name=m["catalog"])
+    if not os.path.exists(datapath):
+        sys.exit("missing MAP catalog {}\nrun map_catalog.py {} first. Available versions:\n{}".format(
+            datapath, m["catalog"], prov.format_available(m["catalog"])))
+    maps = Table.read(datapath)
+    if maps.meta.get('GITHASH') != map_hash:
+        sys.exit("{} has GITHASH={} in its header, expected {}".format(datapath, maps.meta.get('GITHASH'), map_hash))
+    ranpath = os.path.join(prov.CATALOG_DIR, maps.meta['RANFILE'])
+    if not os.path.exists(ranpath):
+        sys.exit("missing box randoms {} (named in {}); run map_catalog.py {}".format(ranpath, datapath, m["catalog"]))
+    rantab = Table.read(ranpath)
+    boxlength = maps.meta['BOXLEN']
+    if rantab.meta.get('BOXLEN') != boxlength:
+        sys.exit("randoms box {} != catalog box {}".format(rantab.meta.get('BOXLEN'), boxlength))
+    print("MAP catalog {} (selection {}, z = {:.4f}), randoms {}".format(
+        os.path.basename(datapath), maps.meta.get('SELECT'), maps.meta.get('ZSEL'), os.path.basename(ranpath)))
+    limits = [[-boxlength/2, boxlength/2]]*3
     jack_data, jack_ran = tools.boxMasks([maps, rantab], limits, list(m["boxdivs"]))
     countkw = dict(position_type='xyz', los='z', include_RSD=m["rsd"])
     noweights = dict(useD1weights=False, useD2weights=False)
@@ -143,6 +149,7 @@ def main():
     parser.add_argument("label", nargs="?", help="measurement label (see --list)")
     parser.add_argument("--list", action="store_true", help="list measurement labels")
     parser.add_argument("--bgs-hash", help="use this BGS catalog version instead of the one matching bgs_catalog.py")
+    parser.add_argument("--map-hash", help="use this MAP catalog version instead of the one matching map_catalog.py + map_tools.py")
     parser.add_argument("--ang-hash", help="use this angular-weights version instead of the one matching angular_weights.py")
     parser.add_argument("--nthreads", type=int, default=None, help="pycorr threads")
     parser.add_argument("--force", action="store_true", help="recompute even if the output files exist")
@@ -155,15 +162,16 @@ def main():
         sys.exit("unknown measurement '{}'. Choose from: {}".format(args.label, ", ".join(MEASUREMENTS)))
     m = MEASUREMENTS[args.label]
 
-    codefiles = prov.STAGE_FILES["cnt"] + (prov.STAGE_FILES["cat_map"] if m["sample"] == "maps" else [])
-    prov.require_clean(codefiles)
+    prov.require_clean(prov.STAGE_FILES["cnt"])
     cnt = prov.stage_hash("cnt")
     if m["sample"] == "bgs":
         cat = args.bgs_hash or prov.stage_hash("cat_bgs")
         if not args.bgs_hash and prov.dirty_files(prov.STAGE_FILES["cat_bgs"]):
             print("WARNING: bgs_catalog.py has uncommitted changes; using the catalog from its last commit ({})".format(cat))
     else:
-        cat = prov.stage_hash("cat_map")
+        cat = args.map_hash or prov.stage_hash("cat_map")
+        if not args.map_hash and prov.dirty_files(prov.STAGE_FILES["cat_map"]):
+            print("WARNING: map_catalog.py / map_tools.py have uncommitted changes; using the catalog from their last commit ({})".format(cat))
     ang = None
     if m.get("weighting") == "pip_ang":
         ang = args.ang_hash or prov.stage_hash("ang")
@@ -184,7 +192,7 @@ def main():
     if m["sample"] == "bgs":
         data, rantab, jack_data, jack_ran, countkw, weights = loadBGS(m, cat, ang)
     else:
-        data, rantab, jack_data, jack_ran, countkw, weights = loadMaps(m)
+        data, rantab, jack_data, jack_ran, countkw, weights = loadMaps(m, cat)
     print("{} data, {} randoms, {} jackknife regions".format(len(data), len(rantab), len(jack_data)))
 
     common = dict(edges=m["edges"], mode=m["mode"], nthreads=args.nthreads, **countkw)
